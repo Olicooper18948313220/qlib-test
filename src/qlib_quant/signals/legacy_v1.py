@@ -27,12 +27,14 @@ def _safe_ratio(a, b):
     return a / b.where(b != 0) 
 
 
-def score_signals(frame: pd.DataFrame, thresholds: dict | None = None) -> pd.DataFrame:
+def score_signals(frame: pd.DataFrame, thresholds: dict | None = None, enabled: list[str] | None = None) -> pd.DataFrame:
     """Return ``signal_score`` and per-rule boolean columns.
 
-    The original ``amount_ratio=2`` predicate means today >= 3x yesterday
-    because its helper checks ``today-yesterday >= 2*yesterday``. We preserve
-    that exact semantics in the 20230111 rule.
+    ``enabled`` is an optional list of signal names; when given, only those
+    rules contribute to ``signal_score`` (the others are still computed as
+    boolean columns but scored 0). The original ``amount_ratio=2`` predicate
+    means today >= 3x yesterday because its helper checks
+    ``today-yesterday >= 2*yesterday``; we preserve that exact semantics.
     """
     thresholds = thresholds or {}
     df = frame.sort_values(["code", "date"]).copy()
@@ -59,6 +61,8 @@ def score_signals(frame: pd.DataFrame, thresholds: dict | None = None) -> pd.Dat
     rules[signal_names[10]] = (amount >= amount_prev * 2.0) & (close > prev_close)
     for name, values in rules.items():
         df[name] = values.fillna(False).astype(bool)
-    df["signal_score"] = df[signal_names].sum(axis=1).astype(float)
+    enabled_set = set(enabled) if enabled is not None else set(signal_names)
+    score_cols = [n for n in signal_names if n in enabled_set]
+    df["signal_score"] = df[score_cols].sum(axis=1).astype(float)
     df["signal"] = df["signal_score"] > 0
     return df
