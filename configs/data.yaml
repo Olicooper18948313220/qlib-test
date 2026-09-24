@@ -1,0 +1,14 @@
+database: D:/quanttrade20260207/data/stockdata/daily_hfq_repaired.db
+table: daily_quote
+instrument_type: equity
+adjustment: hfq
+start: 2018-07-02
+end: 2024-12-31
+output_dir: data/curated
+qlib_dir: data/qlib
+price_fields: [open, high, low, close]
+volume_field: volume
+amount_field: turnover
+code_field: stock_code
+date_field: trade_date
+

@@ -1,0 +1,13 @@
+{
+  "status": "ok",
+  "start": "2020-01-03",
+  "end": "2024-12-31",
+  "initial_value": 1000000.0,
+  "ending_value": 70858.04400032951,
+  "cumulative_return": -0.9291419559996705,
+  "annual_return": -0.4114353003753829,
+  "max_drawdown": -0.9329491918717352,
+  "trade_count": 7674,
+  "ending_positions": 7,
+  "price_adjustment": "hfq (research approximation)"
+}

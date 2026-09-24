@@ -1,0 +1,12 @@
+windows: [5, 10, 20, 30, 60, 120, 250]
+fields: [close, high, low, volume, turnover]
+features:
+  - name: return_5
+    expression: close / shift(close, 5) - 1
+  - name: return_20
+    expression: close / shift(close, 20) - 1
+  - name: volume_ratio_1
+    expression: volume / shift(volume, 1)
+  - name: close_above_high_20
+    expression: close > rolling_max(high, 20, 1)
+

@@ -1,0 +1,6 @@
+start: 2020-01-01
+end: 2024-12-31
+signal_version: legacy_v1
+price_adjustment: hfq
+research_approximation: true
+

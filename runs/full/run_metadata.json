@@ -1,0 +1,11 @@
+{
+  "database": "D:\\quanttrade20260207\\data\\stockdata\\daily_hfq_repaired.db",
+  "start": "2020-01-01",
+  "end": "2024-12-31",
+  "rows_loaded": 5585505,
+  "signal_version": "legacy_v1",
+  "price_adjustment": "hfq",
+  "research_approximation": true,
+  "qlib_version": "0.9.7"
+}
+

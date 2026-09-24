@@ -1,0 +1,15 @@
+{
+  "database": "D:\\quanttrade20260207\\data\\stockdata\\daily_hfq_repaired.db",
+  "table": "daily_quote",
+  "instrument_type": "stock",
+  "adjustment": "hfq",
+  "first_date": "2018-07-02",
+  "last_date": "2024-12-31",
+  "rows": 6894972,
+  "instruments": 5298,
+  "null_trade_status_rows": 6894972,
+  "corporate_action_rows": 0,
+  "source_values": [
+    "tencent:ifzqgtimg/newfqkline/get"
+  ]
+}

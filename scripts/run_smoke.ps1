@@ -1,0 +1,5 @@
+$ErrorActionPreference = 'Stop'
+$project = Split-Path -Parent $PSScriptRoot
+$env:PYTHONPATH = Join-Path $project 'src'
+& 'D:\Anoconda3\envs\py311\python.exe' -m qlib_quant.cli backtest --start 2020-01-01 --end 2020-03-31 --max-rows 50000 --output runs/smoke
+

@@ -1,0 +1,11 @@
+initial_cash: 1000000
+max_positions: 20
+weighting: equal
+rebalance: weekly
+entry: next_open
+lot_size: 100
+commission_rate: 0.0003
+stamp_duty_rate: 0.001
+slippage_bps: 5
+long_only: true
+

@@ -1,0 +1,19 @@
+version: legacy_v1
+enabled:
+  - caochen_volume_bloom_above_bottom_x_20230111
+  - caochen_volume_bloom_above_bottom_x_20230112
+  - caochen_price_rise_predict_rise_x_20220914
+  - caochen_price_down_predict_rise_1_x_20221129
+  - caochen_price_down_predict_rise_2_x_20221020
+  - caochen_price_down_predict_rise_3_x_20221020
+  - caochen_price_reach_year_rise_1_x_20230212
+  - caochen_price_reach_year_rise_2_x_20230210
+  - caochen_price_reach_year_rise_3_x_20230213
+  - caochen_price_low_above_previous_10_x_20230208
+  - caochen_volume_enlarge_price_rise_4_x_20230310
+thresholds:
+  volume_ratio_20230111: 2.0
+  volume_ratio_20230112: 1.0
+  price_rise_min: 0.03
+  price_rise_max: 0.30
+
