@@ -40,11 +40,14 @@ def main(argv=None):
         from .signals.legacy_v1 import score_signals
         from .backtest.simple import run_backtest
         from .reports import write_report
-        rows = list(iter_quotes(_database(args), args.start, args.end))
+        # Load a warm-up window before ``--start`` so the 250-period rolling
+        # features have history; trading still only starts at ``--start``.
+        warmup_start = (pd.Timestamp(args.start) - pd.Timedelta(days=400)).strftime("%Y-%m-%d")
+        rows = list(iter_quotes(_database(args), warmup_start, args.end))
         df = pd.DataFrame(rows).rename(columns={"stock_name": "name"})
         if args.max_rows: df = df.head(args.max_rows)
         df = add_technical_features(df); df = score_signals(df)
-        equity, trades = run_backtest(df)
+        equity, trades = run_backtest(df, start=args.start)
         out = ROOT / args.output; write_report(equity, trades, out)
         metadata = {"database": _database(args), "start": args.start, "end": args.end,
                     "rows_loaded": int(len(df)), "signal_version": "legacy_v1",
@@ -57,4 +60,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -40,9 +40,9 @@ def score_signals(frame: pd.DataFrame, thresholds: dict | None = None) -> pd.Dat
     close, high, low, volume, amount = [df[x] for x in ("close", "high", "low", "volume", "amount")]
     prev_close = g["close"].shift(1)
     prev2_close = g["close"].shift(2)
-    prev_low_10 = g["low"].shift(1).rolling(10, min_periods=10).min().reset_index(level=0, drop=True)
-    prev_low_250 = g["low"].shift(1).rolling(250, min_periods=250).min().reset_index(level=0, drop=True)
-    prev_high_250 = g["high"].shift(1).rolling(250, min_periods=250).max().reset_index(level=0, drop=True)
+    prev_low_10 = g["low"].transform(lambda s: s.shift(1).rolling(10, min_periods=10).min())
+    prev_low_250 = g["low"].transform(lambda s: s.shift(1).rolling(250, min_periods=250).min())
+    prev_high_250 = g["high"].transform(lambda s: s.shift(1).rolling(250, min_periods=250).max())
     vol_prev = g["volume"].shift(1)
     amount_prev = g["amount"].shift(1)
     rules = {}
@@ -62,4 +62,3 @@ def score_signals(frame: pd.DataFrame, thresholds: dict | None = None) -> pd.Dat
     df["signal_score"] = df[signal_names].sum(axis=1).astype(float)
     df["signal"] = df["signal_score"] > 0
     return df
-
