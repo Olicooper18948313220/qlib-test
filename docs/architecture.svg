@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="720" viewBox="0 0 1500 720" role="img" aria-labelledby="title desc">
+  <title id="title">qlib_quant 当前框架结构</title>
+  <desc id="desc">从 repaired SQLite 行情经过因子、信号、组合、回测到报告和网页的流程图，并标出 Qlib 适配接口和未接入的 YAML 配置。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#345"/>
+    </marker>
+    <marker id="arrowPending" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#a66b00"/>
+    </marker>
+    <style>
+      .box { fill:#e8f3ff; stroke:#2b6cb0; stroke-width:2; rx:12; }
+      .pending { fill:#fff5db; stroke:#b7791f; stroke-width:2; stroke-dasharray:7 5; rx:12; }
+      .data { fill:#eef8ee; stroke:#3c8c40; stroke-width:2; rx:12; }
+      .title { font: 600 24px "Segoe UI", "Microsoft YaHei", sans-serif; fill:#17365d; }
+      .label { font: 500 16px "Segoe UI", "Microsoft YaHei", sans-serif; fill:#17365d; text-anchor:middle; }
+      .small { font: 400 13px "Segoe UI", "Microsoft YaHei", sans-serif; fill:#425466; text-anchor:middle; }
+      .line { fill:none; stroke:#345; stroke-width:2.2; marker-end:url(#arrow); }
+      .linePending { fill:none; stroke:#a66b00; stroke-width:2; stroke-dasharray:7 5; marker-end:url(#arrowPending); }
+    </style>
+  </defs>
+  <rect x="0" y="0" width="1500" height="720" fill="#f8fafc"/>
+  <text x="50" y="48" class="title">qlib_quant 当前框架结构</text>
+  <text x="50" y="78" class="small" text-anchor="start">实线：当前回测链路　虚线：已准备但尚未接入主回测的接口</text>
+
+  <rect x="45" y="150" width="170" height="90" class="data"/>
+  <text x="130" y="188" class="label">repaired SQLite</text><text x="130" y="214" class="small">后复权日线</text>
+  <rect x="270" y="150" width="180" height="90" class="box"/>
+  <text x="360" y="188" class="label">data/db.py</text><text x="360" y="214" class="small">读取 iter_quotes</text>
+  <rect x="505" y="150" width="190" height="90" class="box"/>
+  <text x="600" y="188" class="label">technical.py</text><text x="600" y="214" class="small">技术特征</text>
+  <rect x="750" y="150" width="205" height="90" class="box"/>
+  <text x="852" y="188" class="label">signals/legacy_v1.py</text><text x="852" y="214" class="small">11条选股信号</text>
+  <rect x="1010" y="150" width="190" height="90" class="box"/>
+  <text x="1105" y="188" class="label">portfolio/baseline.py</text><text x="1105" y="214" class="small">前20只、等权</text>
+  <rect x="1255" y="150" width="190" height="90" class="box"/>
+  <text x="1350" y="188" class="label">backtest/simple.py</text><text x="1350" y="214" class="small">周频、下一日开盘</text>
+
+  <path d="M215 195 H270" class="line"/><path d="M450 195 H505" class="line"/><path d="M695 195 H750" class="line"/><path d="M955 195 H1010" class="line"/><path d="M1200 195 H1255" class="line"/>
+
+  <rect x="1050" y="335" width="190" height="90" class="box"/>
+  <text x="1145" y="373" class="label">reports.py</text><text x="1145" y="399" class="small">CSV、JSON、PNG</text>
+  <rect x="1280" y="335" width="170" height="90" class="box"/>
+  <text x="1365" y="373" class="label">app/main.py</text><text x="1365" y="399" class="small">Streamlit 查看</text>
+  <path d="M1350 240 V290 H1145 V335" class="line"/><path d="M1240 380 H1280" class="line"/>
+
+  <rect x="275" y="335" width="205" height="90" class="pending"/>
+  <text x="377" y="373" class="label">data/export.py</text><text x="377" y="399" class="small">标准化 CSV</text>
+  <rect x="535" y="335" width="235" height="90" class="pending"/>
+  <text x="652" y="373" class="label">data/qlib_adapter.py</text><text x="652" y="399" class="small">Qlib CSV / DataHandlerLP</text>
+  <path d="M360 240 V290 H377 V335" class="linePending"/><path d="M480 380 H535" class="linePending"/><path d="M770 380 H900 V285 H1350 V240" class="linePending"/>
+
+  <rect x="45" y="335" width="180" height="90" class="pending"/>
+  <text x="135" y="373" class="label">configs/*.yaml</text><text x="135" y="399" class="small">参数文件，CLI尚未读取</text>
+  <path d="M225 380 H750 V285" class="linePending"/><path d="M225 380 H1010 V285" class="linePending"/>
+
+  <text x="50" y="540" class="small" text-anchor="start">研究目标：年化收益 &gt; 40%，最大回撤 &lt; 15%（待修复记账、确认数据口径后验证）</text>
+  <text x="50" y="575" class="small" text-anchor="start">价格使用后复权，成交价属于研究近似；数据库、完整行情和缓存不随代码仓库上传。</text>
+</svg>
+
