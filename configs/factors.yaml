@@ -9,4 +9,3 @@ features:
     expression: volume / shift(volume, 1)
   - name: close_above_high_20
     expression: close > rolling_max(high, 20, 1)
-

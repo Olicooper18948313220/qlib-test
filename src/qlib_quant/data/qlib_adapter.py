@@ -48,4 +48,3 @@ def handler_from_csv(path: str | Path):
     df["instrument"] = df["instrument"].astype(str).str.zfill(6)
     df = df.set_index(["instrument", "date"]).sort_index()
     return DataHandlerLP.from_df(df)
-

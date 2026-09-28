@@ -1,0 +1,18 @@
+# 学习练习 E：单独验证新因子信号；明确只启用教学信号。
+data:
+  database: D:/quanttrade20260207/data/stockdata/daily_hfq_repaired.db
+backtest:
+  start: 2020-01-01
+  end: 2020-02-28
+  initial_cash: 1000000
+  max_positions: 3
+  max_stocks: 5
+  rebalance_weekday: 4
+signals:
+  version: legacy_v1
+  enabled:
+    - learning_ma_gap
+  thresholds:
+    volume_ratio_20230111: 2.0
+    volume_ratio_20230112: 1.0
+    learning_ma_gap_min: 0.02

@@ -16,8 +16,10 @@ class DataManifest:
     null_trade_status_rows: int
     corporate_action_rows: int
     source_values: tuple[str, ...]
+    duplicate_rows: int = 0
+    invalid_price_rows: int = 0
+    invalid_date_rows: int = 0
 
     def write(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(asdict(self), ensure_ascii=False, indent=2), encoding="utf-8")
-

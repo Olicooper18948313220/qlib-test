@@ -10,4 +10,3 @@ def select_equal_weight(day: pd.DataFrame, max_positions: int = 20) -> pd.DataFr
         return selected.assign(target_weight=pd.Series(dtype=float))
     selected["target_weight"] = 1.0 / len(selected)
     return selected
-

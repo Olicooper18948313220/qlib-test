@@ -1,0 +1,6 @@
+# CLI 示例：通过 --config configs/0708cao.yaml 选择新信号族。
+# 新信号默认全部关闭，请在本次实验参数中显式启用。
+signals:
+  version: 0708cao
+  enabled: []
+  thresholds: {}

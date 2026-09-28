@@ -6,50 +6,43 @@ from pathlib import Path
 import pandas as pd
 
 
-def summarize(equity: pd.DataFrame, trades: pd.DataFrame,
-              benchmark_metrics: dict | None = None) -> dict:
+def summarize(equity: pd.DataFrame, trades: pd.DataFrame) -> dict:
     if equity.empty:
         return {"status": "empty", "trades": 0}
     curve = equity["market_value"]
     total = float(curve.iloc[-1] / curve.iloc[0] - 1)
     years = max((pd.Timestamp(equity["date"].iloc[-1]) - pd.Timestamp(equity["date"].iloc[0])).days / 365.25, 1 / 365.25)
-    summary = {"status": "ok", "start": str(equity["date"].iloc[0]), "end": str(equity["date"].iloc[-1]),
-               "initial_value": float(curve.iloc[0]), "ending_value": float(curve.iloc[-1]),
-               "cumulative_return": total, "annual_return": float((1 + total) ** (1 / years) - 1),
-               "max_drawdown": float(equity["drawdown"].min()), "trade_count": int(len(trades)),
-               "ending_positions": int(equity["positions"].iloc[-1]),
-               "price_adjustment": "hfq (research approximation)"}
-    if benchmark_metrics:
-        summary["benchmark"] = benchmark_metrics
-    return summary
+    return {"status": "ok", "start": str(equity["date"].iloc[0]), "end": str(equity["date"].iloc[-1]),
+            "initial_value": float(curve.iloc[0]), "ending_value": float(curve.iloc[-1]),
+            "cumulative_return": total, "annual_return": float((1 + total) ** (1 / years) - 1),
+            "max_drawdown": float(equity["drawdown"].min()), "trade_count": int(len(trades)),
+            "ending_positions": int(equity["positions"].iloc[-1]),
+            "total_fees": float(trades["fee"].sum()) if not trades.empty and "fee" in trades else 0.0,
+            "stale_valuation_days": int(equity["stale_valuation"].sum()) if "stale_valuation" in equity else 0,
+            "price_adjustment": "hfq (research approximation)"}
 
 
-def write_report(equity: pd.DataFrame, trades: pd.DataFrame, out_dir: str | Path,
-                 benchmark_metrics: dict | None = None,
-                 benchmark_curve: pd.DataFrame | None = None) -> Path:
+def write_report(equity: pd.DataFrame, trades: pd.DataFrame, out_dir: str | Path) -> Path:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     equity.to_csv(out / "equity_curve.csv", index=False, encoding="utf-8-sig")
     trades.to_csv(out / "trades.csv", index=False, encoding="utf-8-sig")
-    if benchmark_curve is not None and not benchmark_curve.empty:
-        benchmark_curve.to_csv(out / "benchmark_curve.csv", index=False, encoding="utf-8-sig")
-    summary = summarize(equity, trades, benchmark_metrics)
+    for key, filename in (("positions", "positions.csv"), ("skipped_orders", "skipped_orders.csv")):
+        if key in equity.attrs:
+            equity.attrs[key].to_csv(out / filename, index=False, encoding="utf-8-sig")
+    summary = summarize(equity, trades)
     (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     if not equity.empty:
         try:
             import matplotlib.pyplot as plt
             fig, ax = plt.subplots(figsize=(10, 4.5))
-            ax.plot(pd.to_datetime(equity["date"]), equity["market_value"], color="#1f77b4", linewidth=1.2, label="strategy")
-            if benchmark_curve is not None and not benchmark_curve.empty:
-                bench_scaled = benchmark_curve["close"] / benchmark_curve["close"].iloc[0] * equity["market_value"].iloc[0]
-                ax.plot(benchmark_curve["date"], bench_scaled, color="#ff7f0e", linewidth=1.0, label="CSI300")
-                ax.legend()
+            ax.plot(pd.to_datetime(equity["date"]), equity["market_value"], color="#1f77b4", linewidth=1.2)
             ax.set_title("qlib_quant equity curve (HFQ research approximation)")
             ax.set_ylabel("portfolio value")
             ax.grid(alpha=0.25)
             fig.tight_layout()
             fig.savefig(out / "equity_curve.png", dpi=140)
             plt.close(fig)
-        except Exception:
-            pass
+        except Exception as exc:
+            (out / "plot_warning.txt").write_text(str(exc), encoding="utf-8")
     return out / "summary.json"

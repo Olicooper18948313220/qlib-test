@@ -51,10 +51,9 @@
   <path d="M360 240 V290 H377 V335" class="linePending"/><path d="M480 380 H535" class="linePending"/><path d="M770 380 H900 V285 H1350 V240" class="linePending"/>
 
   <rect x="45" y="335" width="180" height="90" class="pending"/>
-  <text x="135" y="373" class="label">configs/*.yaml</text><text x="135" y="399" class="small">参数文件，CLI尚未读取</text>
+  <text x="135" y="373" class="label">configs/*.yaml</text><text x="135" y="399" class="small">参数文件，运行服务已读取</text>
   <path d="M225 380 H750 V285" class="linePending"/><path d="M225 380 H1010 V285" class="linePending"/>
 
   <text x="50" y="540" class="small" text-anchor="start">研究目标：年化收益 &gt; 40%，最大回撤 &lt; 15%（待修复记账、确认数据口径后验证）</text>
   <text x="50" y="575" class="small" text-anchor="start">价格使用后复权，成交价属于研究近似；数据库、完整行情和缓存不随代码仓库上传。</text>
 </svg>
-

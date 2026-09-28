@@ -1,0 +1,28 @@
+# 学习练习 A：当前原有 11 条规则，独立短区间小样本。
+data:
+  database: D:/quanttrade20260207/data/stockdata/daily_hfq_repaired.db
+backtest:
+  start: 2020-01-01
+  end: 2020-02-28
+  initial_cash: 1000000
+  max_positions: 3
+  max_stocks: 5
+  rebalance_weekday: 4
+signals:
+  version: legacy_v1
+  enabled:
+    - caochen_volume_bloom_above_bottom_x_20230111
+    - caochen_volume_bloom_above_bottom_x_20230112
+    - caochen_price_rise_predict_rise_x_20220914
+    - caochen_price_down_predict_rise_1_x_20221129
+    - caochen_price_down_predict_rise_2_x_20221020
+    - caochen_price_down_predict_rise_3_x_20221020
+    - caochen_price_reach_year_rise_1_x_20230212
+    - caochen_price_reach_year_rise_2_x_20230210
+    - caochen_price_reach_year_rise_3_x_20230213
+    - caochen_price_low_above_previous_10_x_20230208
+    - caochen_volume_enlarge_price_rise_4_x_20230310
+  thresholds:
+    volume_ratio_20230111: 2.0
+    volume_ratio_20230112: 1.0
+    learning_ma_gap_min: 0.02

@@ -11,9 +11,10 @@ enabled:
   - caochen_price_reach_year_rise_3_x_20230213
   - caochen_price_low_above_previous_10_x_20230208
   - caochen_volume_enlarge_price_rise_4_x_20230310
+  # 教学信号默认关闭；完成教学因子练习后再启用。
 thresholds:
   volume_ratio_20230111: 2.0
   volume_ratio_20230112: 1.0
   price_rise_min: 0.03
   price_rise_max: 0.30
-
+  learning_ma_gap_min: 0.02

@@ -1,0 +1,17 @@
+enabled: true
+annualization_days: 252
+risk_free_rate: 0.0
+sortino_target_return: 0.0
+factors:
+  - ma_gap_20
+  - return_20
+  - volume_ratio_1
+  - signal_score
+horizons: [1, 5, 20]
+min_cross_section: 20
+min_per_quantile: 3
+benchmark:
+  path: ""
+  name: ""
+  source: ""
+  return_type: total

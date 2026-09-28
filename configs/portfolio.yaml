@@ -8,4 +8,3 @@ commission_rate: 0.0003
 stamp_duty_rate: 0.001
 slippage_bps: 5
 long_only: true
-

@@ -26,4 +26,3 @@ def write_manifest(database: str, output_dir: str | Path) -> Path:
     path = Path(output_dir) / "data_manifest.json"
     manifest.write(path)
     return path
-

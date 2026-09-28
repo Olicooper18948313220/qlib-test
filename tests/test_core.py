@@ -1,7 +1,7 @@
 import pandas as pd
 
 from qlib_quant.factors.technical import add_technical_features
-from qlib_quant.signals.legacy_v1 import score_signals, signal_names
+from qlib_quant.signals.legacy_v1 import score_signals, signal_names, legacy_signal_names
 from qlib_quant.portfolio.baseline import select_equal_weight
 
 
@@ -24,8 +24,9 @@ def test_features_are_causal():
 
 def test_signal_registry_and_portfolio():
     out = score_signals(add_technical_features(sample()))
-    assert len(signal_names) == 11
+    assert len(legacy_signal_names) == 11
+    assert len(signal_names) == 12
+    assert not out["learning_ma_gap"].any()
     assert out["signal_score"].ge(0).all()
     selected = select_equal_weight(out[out["date"] == out["date"].max()], 1)
     assert len(selected) <= 1
-

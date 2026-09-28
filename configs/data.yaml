@@ -11,4 +11,3 @@ volume_field: volume
 amount_field: turnover
 code_field: stock_code
 date_field: trade_date
-

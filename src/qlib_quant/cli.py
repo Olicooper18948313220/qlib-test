@@ -12,12 +12,6 @@ def _database(args):
     return args.database or str(Path("D:/quanttrade20260207/data/stockdata/daily_hfq_repaired.db"))
 
 
-def _resolve(p: str) -> Path:
-    """Resolve a CLI path relative to the repo root when not absolute."""
-    path = Path(p)
-    return path if path.is_absolute() else ROOT / path
-
-
 def main(argv=None):
     p = argparse.ArgumentParser(description="qlib_quant 本地研究入口")
     sub = p.add_subparsers(dest="command", required=True)
@@ -25,11 +19,18 @@ def main(argv=None):
     e = sub.add_parser("export"); e.add_argument("--database"); e.add_argument("--start", default="2018-07-02"); e.add_argument("--end", default="2024-12-31")
     e.add_argument("--output", default="data/curated")
     q = sub.add_parser("qlib-export"); q.add_argument("--database"); q.add_argument("--start", default="2018-07-02"); q.add_argument("--end", default="2024-12-31"); q.add_argument("--output", default="data/qlib"); q.add_argument("--max-rows", type=int, default=0)
-    b = sub.add_parser("backtest"); b.add_argument("--database"); b.add_argument("--start", default="2020-01-01"); b.add_argument("--end", default="2024-12-31"); b.add_argument("--max-rows", type=int, default=0)
-    b.add_argument("--output", default="runs/latest")
-    b.add_argument("--config-dir", default="configs")
-    b.add_argument("--benchmark-csv", default="data/benchmark/csi300.csv")
-    b.add_argument("--no-benchmark", action="store_true")
+    b = sub.add_parser("backtest")
+    b.add_argument("--request", help="由网页任务生成的 JSON 请求")
+    b.add_argument("--database"); b.add_argument("--start"); b.add_argument("--end")
+    b.add_argument("--max-rows", type=int); b.add_argument("--max-stocks", type=int)
+    b.add_argument("--config", help="本次参数覆盖 YAML，顶层为 data/backtest/signals/factors/evaluation")
+    b.add_argument("--output")
+    b.add_argument("--initial-cash", type=float); b.add_argument("--max-positions", type=int)
+    b.add_argument("--rebalance-weekday", type=int); b.add_argument("--commission-rate", type=float)
+    b.add_argument("--stamp-duty-rate", type=float); b.add_argument("--slippage-bps", type=float)
+    b.add_argument("--benchmark-csv", help="本地基准 CSV（必需列 date,close）")
+    b.add_argument("--benchmark-name"); b.add_argument("--benchmark-source")
+    b.add_argument("--benchmark-return-type", choices=("total", "price"))
     args = p.parse_args(argv)
     if args.command == "validate":
         from .data.db import validate_database
@@ -43,74 +44,39 @@ def main(argv=None):
         from .data.qlib_adapter import export_qlib_csv
         print(export_qlib_csv(_database(args), ROOT / args.output, args.start, args.end, args.max_rows)); return 0
     if args.command == "backtest":
-        import pandas as pd
-        from .data.db import iter_quotes
-        from .factors.technical import add_technical_features
-        from .signals.legacy_v1 import score_signals
-        from .backtest.simple import run_backtest
-        from .reports import write_report
-        from .config import load_portfolio, load_signals, load_factors, portfolio_weekday
-        from .benchmark import load_index_csv, align_benchmark, compute_metrics
-
-        config_dir = _resolve(args.config_dir)
-        pf = load_portfolio(config_dir)
-        sig = load_signals(config_dir)
-        fac = load_factors(config_dir)
-
-        windows = tuple(fac.get("windows", [5, 10, 20, 30, 60, 120, 250]))
-        thresholds = sig.get("thresholds", {}) or {}
-        enabled = sig.get("enabled")
-
-        # Load a warm-up window before ``--start`` so the 250-period rolling
-        # features have history; trading still only starts at ``--start``.
-        warmup_start = (pd.Timestamp(args.start) - pd.Timedelta(days=400)).strftime("%Y-%m-%d")
-        rows = list(iter_quotes(_database(args), warmup_start, args.end))
-        df = pd.DataFrame(rows).rename(columns={"stock_name": "name"})
-        if args.max_rows: df = df.head(args.max_rows)
-        df = add_technical_features(df, windows=windows)
-        df = score_signals(df, thresholds=thresholds, enabled=enabled)
-        equity, trades = run_backtest(
-            df, start=args.start,
-            initial_cash=pf.get("initial_cash", 1_000_000),
-            max_positions=pf.get("max_positions", 20),
-            commission_rate=pf.get("commission_rate", 0.0003),
-            stamp_duty_rate=pf.get("stamp_duty_rate", 0.001),
-            slippage_bps=pf.get("slippage_bps", 5),
-            rebalance_weekday=portfolio_weekday(pf),
-        )
-
-        benchmark_metrics = None
-        benchmark_curve = None
-        bench_source = None
-        if not args.no_benchmark:
-            bench_path = _resolve(args.benchmark_csv)
-            if bench_path.exists():
-                bench = load_index_csv(bench_path)
-                aligned = align_benchmark(equity["date"], bench)
-                if len(aligned) >= 2:
-                    benchmark_metrics = compute_metrics(equity, aligned)
-                    benchmark_curve = aligned.rename("close").reset_index().rename(columns={"index": "date"})
-                    bench_source = str(bench_path)
-                else:
-                    print("warning: 基准与回测区间对齐后不足 2 个交易日，跳过基准指标")
-            else:
-                print(f"warning: 未找到基准文件 {bench_path}（可运行 python scripts/fetch_csi300.py 生成）")
-
-        out = _resolve(args.output)
-        write_report(equity, trades, out, benchmark_metrics=benchmark_metrics, benchmark_curve=benchmark_curve)
-
-        try:
-            qlib_version = __import__("qlib").__version__
-        except Exception:
-            qlib_version = "not-installed"
-        metadata = {"database": _database(args), "start": args.start, "end": args.end,
-                    "rows_loaded": int(len(df)), "signal_version": sig.get("version", "legacy_v1"),
-                    "price_adjustment": "hfq", "research_approximation": True,
-                    "config_dir": str(config_dir), "benchmark": bench_source,
-                    "qlib_version": qlib_version}
-        (out / "run_metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(json.dumps({"rows": len(df), "output": str(out), "trades": len(trades),
-                          "benchmark": benchmark_metrics}, ensure_ascii=False)); return 0
+        from .runner import run_request
+        if args.request:
+            request = json.loads(Path(args.request).read_text(encoding="utf-8"))
+        else:
+            request = {"database": args.database, "start": args.start, "end": args.end,
+                       "max_rows": args.max_rows, "max_stocks": args.max_stocks, "output": args.output}
+            bt = {key: value for key, value in {
+                "initial_cash": args.initial_cash, "max_positions": args.max_positions,
+                "rebalance_weekday": args.rebalance_weekday, "commission_rate": args.commission_rate,
+                "stamp_duty_rate": args.stamp_duty_rate, "slippage_bps": args.slippage_bps,
+            }.items() if value is not None}
+            if args.config:
+                import yaml
+                request["config"] = yaml.safe_load(Path(args.config).read_text(encoding="utf-8")) or {}
+            request.setdefault("config", {}).setdefault("backtest", {}).update(bt)
+        if args.benchmark_csv:
+            config = request.setdefault("config", {})
+            benchmark = config.setdefault("evaluation", {}).setdefault("benchmark", {})
+            benchmark.update({"path": str(Path(args.benchmark_csv).resolve()),
+                              "name": args.benchmark_name or benchmark.get("name", ""),
+                              "source": args.benchmark_source or benchmark.get("source", ""),
+                              "return_type": args.benchmark_return_type or benchmark.get("return_type", "total")})
+        if args.request and Path(args.request).parent.parent.name == "jobs":
+            job = Path(args.request).resolve().parent
+            out = run_request(request, run_dir=job / "result", job_dir=job)
+        else:
+            out = run_request(request)
+        from .experiments import read_json
+        result = {"output": str(out), "state": read_json(out / "status.json").get("state")}
+        if (out / "summary.json").exists():
+            result["summary"] = str(out / "summary.json")
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
     return 1
 
 
