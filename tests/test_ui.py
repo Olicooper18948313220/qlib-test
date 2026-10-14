@@ -53,3 +53,37 @@ def test_ui_exposes_learning_route():
     app.sidebar.radio[0].set_value("学习路线").run()
     assert not app.exception
     assert any("因子开发" in markdown.value for markdown in app.markdown)
+
+
+def test_signal_series_switch_refreshes_options_before_submission(monkeypatch):
+    import qlib_quant.jobs as jobs
+    from qlib_quant.signals.zff0708 import signal_names
+
+    received = []
+
+    def start(req):
+        received.append(req)
+        return Path("test-job"), None
+
+    monkeypatch.setattr(jobs, "start_job", start)
+    app = AppTest.from_file(str(ROOT / "app/main.py"), default_timeout=20).run()
+    app.sidebar.radio[0].set_value("新建回测").run()
+    series = app.selectbox(key="signal_version")
+    # Form widgets do not send changes until submit in the real browser.
+    assert not series.proto.form_id
+    series.set_value("0708cao").run()
+    assert not app.exception
+    assert not received
+    selector = app.multiselect(key="signals_0708cao")
+    assert len(selector.options) == len(signal_names) == 11
+    assert all(name in label for name, label in zip(signal_names, selector.options))
+    assert selector.value == []
+    selector.set_value(["0708cao_sig1", "0708cao_sig6"])
+    app.button[0].click().run()
+    assert not app.exception
+    assert received[0]["config"]["signals"] == {
+        "version": "0708cao", "enabled": ["0708cao_sig1", "0708cao_sig6"], "thresholds": {}}
+    app.selectbox(key="signal_version").set_value("legacy_v1").run()
+    assert not app.exception
+    assert app.multiselect(key="signals_legacy_v1").value
+    assert len(received) == 1

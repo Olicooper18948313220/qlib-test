@@ -11,7 +11,7 @@ horizons: [1, 5, 20]
 min_cross_section: 20
 min_per_quantile: 3
 benchmark:
-  path: ""
-  name: ""
-  source: ""
-  return_type: total
+  path: data/csi100_000903.csv
+  name: 沪深100（000903，现中证A100）
+  source: 东方财富历史行情接口（指数代码000903）
+  return_type: price

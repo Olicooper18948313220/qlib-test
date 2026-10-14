@@ -1,0 +1,437 @@
+//@version=6
+indicator("三时段日内助手 v1 · 1m执行 / 5m信号 / 15m方向", overlay = true, max_labels_count = 300, max_bars_back = 1000, dynamic_requests = true)
+
+// Indicator only. No broker connection, fill inference, or performance claims.
+const string TZ = "America/New_York"
+const string ACCOUNT = "账户与费用（估计值，须按IBKR校准）"
+const string CONTROLS = "人工控制（修改后须重新创建提醒）"
+const string DISPLAY = "图形与提醒"
+float settledCash = input.float(500.0, "已交收现金 USD", minval = 0, group = ACCOUNT)
+float reserveCash = input.float(50.0, "现金缓冲 USD", minval = 0, group = ACCOUNT)
+float capitalCap = input.float(450.0, "本金及买入费上限 USD", minval = 0, group = ACCOUNT)
+float riskBudget = input.float(2.50, "单笔计划风险上限 USD", minval = 0, group = ACCOUNT)
+float buyFee = input.float(0.50, "每笔买入预估总费用 USD", minval = 0, group = ACCOUNT)
+float sellFee = input.float(0.50, "每笔卖出预估总费用 USD", minval = 0, group = ACCOUNT)
+float spreadEstimate = input.float(0.02, "预估价差 USD（不是实时价差）", minval = 0, group = ACCOUNT)
+bool pauseNew = input.bool(false, "暂停新买入提醒", group = CONTROLS)
+bool blockDay = input.bool(false, "禁止交易／事件日／提前收市", group = CONTROLS)
+bool premarketChecked = input.bool(false, "盘前数据缺失时：我已人工核对阻力", group = CONTROLS)
+float manualPremarketHigh = input.float(0.0, "人工盘前高点（缺数据时填写；0为无）", minval = 0, group = CONTROLS)
+bool useBlackout = input.bool(false, "启用每日消息暂停时段", group = CONTROLS)
+string blackoutSession = input.session("1345-1430", "暂停新信号时段（美东）", group = CONTROLS)
+bool showLevels = input.bool(true, "显示参考价位", group = DISPLAY)
+bool enablePrepare = input.bool(true, "发送准备提醒", group = DISPLAY)
+bool enableInvalid = input.bool(true, "发送失效提醒", group = DISPLAY)
+bool enableExit = input.bool(true, "发送时间退出提醒", group = DISPLAY)
+
+string regularTicker = ticker.new(syminfo.prefix, syminfo.ticker, session.regular)
+string extendedTicker = ticker.new(syminfo.prefix, syminfo.ticker, session.extended)
+float buffer = math.max(spreadEstimate, syminfo.mintick)
+
+f_day(int stamp) =>
+    year(stamp, TZ) * 10000 + month(stamp, TZ) * 100 + dayofmonth(stamp, TZ)
+
+f_minute(int stamp) =>
+    hour(stamp, TZ) * 60 + minute(stamp, TZ)
+
+f_round_down(float price) =>
+    math.floor(price / syminfo.mintick) * syminfo.mintick
+
+f_round_up(float price) =>
+    math.ceil(price / syminfo.mintick) * syminfo.mintick
+
+f_name(int phase) =>
+    phase == 1 ? "开盘突破回踩" : phase == 2 ? "中盘趋势回踩" : phase == 3 ? "尾盘整理突破" : "等待结构"
+
+f_end_minute(int phase) =>
+    phase == 1 ? 645 : phase == 2 ? 810 : 915
+
+f_exit_minute(int phase) =>
+    phase == 1 ? 675 : phase == 2 ? 840 : 945
+
+f_price(float price) =>
+    na(price) ? "—" : str.tostring(price, format.mintick)
+
+f_vwap() =>
+    var int savedDay = na
+    var float dollarVolume = 0.0
+    var float totalVolume = 0.0
+    int currentDay = f_day(time)
+    if na(savedDay) or currentDay != savedDay
+        savedDay := currentDay
+        dollarVolume := 0.0
+        totalVolume := 0.0
+    bool rth = f_minute(time) >= 570 and f_minute(time) < 960
+    if rth and not na(volume) and volume > 0
+        dollarVolume += hlc3 * volume
+        totalVolume += volume
+    totalVolume > 0 ? dollarVolume / totalVolume : na
+
+f_direction_snapshot() =>
+    float vw = f_vwap()
+    // Every tuple field is offset: no unfinished 15-minute data.
+    [close[1], close[2], vw[1], vw[2], vw[3], f_day(time[1]), f_day(time[2]), f_day(time[3])]
+
+f_premarket() =>
+    var int savedDay = na
+    var float premHigh = na
+    var float premLow = na
+    var int count = 0
+    int currentDay = f_day(time)
+    if na(savedDay) or currentDay != savedDay
+        savedDay := currentDay
+        premHigh := na
+        premLow := na
+        count := 0
+    int minuteNow = f_minute(time)
+    if minuteNow >= 240 and minuteNow < 570
+        premHigh := na(premHigh) ? high : math.max(premHigh, high)
+        premLow := na(premLow) ? low : math.min(premLow, low)
+        count += 1
+    [savedDay, premHigh, premLow, count]
+
+// This engine executes in the regular-session 5-minute context, not in 1m.
+f_engine() =>
+    [c15, p15, v15, pv15, oldV15, d15, pd15, oldD15] = request.security(regularTicker, "15", f_direction_snapshot(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+    float vw = f_vwap()
+    float ema = ta.ema(close, 20)
+    float precedingSixVolume = ta.sma(volume, 6)[1]
+    float previousBoxHigh = ta.highest(high[1], 4)
+    float previousBoxLow = ta.lowest(low[1], 4)
+    float precedingMove = ta.highest(high[5], 6) - ta.lowest(low[5], 6)
+    int currentDay = f_day(time)
+    int minuteOpen = f_minute(time)
+    int minuteEnd = f_minute(time_close)
+    var int savedDay = na
+    var float orHigh = na
+    var float orLow = na
+    var int orCount = 0
+    var int dayCount = 0
+    var float dayHigh = na
+    var float dayLow = na
+    var int openState = 0
+    var int openWait = 0
+    var float openPullLow = na
+    var bool openTouched = false
+    var bool midUsed = false
+    var int midCount = 0
+    var float midLow = na
+    var float midVolume = 0.0
+    var bool midTouch = false
+    var int tailState = 0
+    var int tailWait = 0
+    var float tailHigh = na
+    var float tailLow = na
+    if na(savedDay) or currentDay != savedDay
+        savedDay := currentDay
+        orHigh := na
+        orLow := na
+        orCount := 0
+        dayCount := 0
+        dayHigh := na
+        dayLow := na
+        openState := 0
+        openWait := 0
+        openPullLow := na
+        openTouched := false
+        midUsed := false
+        midCount := 0
+        midLow := na
+        midVolume := 0.0
+        midTouch := false
+        tailState := 0
+        tailWait := 0
+        tailHigh := na
+        tailLow := na
+    float priorDayHigh = dayHigh
+    dayCount += 1
+    dayHigh := na(dayHigh) ? high : math.max(dayHigh, high)
+    dayLow := na(dayLow) ? low : math.min(dayLow, low)
+    if minuteOpen >= 570 and minuteOpen < 600
+        orHigh := na(orHigh) ? high : math.max(orHigh, high)
+        orLow := na(orLow) ? low : math.min(orLow, low)
+        orCount += 1
+
+    bool warmed = not na(ema) and not na(vw) and not na(precedingSixVolume) and precedingSixVolume > 0 and not na(close[19])
+    bool sameDirectionDay = d15 == currentDay and pd15 == currentDay and oldD15 == currentDay
+    bool trend = sameDirectionDay and c15 > v15 and p15 > pv15 and c15 > p15 and v15 > oldV15
+    int confirmed = 0
+    int prepared = 0
+    int failure = 0
+    float entry = na
+    float stop = na
+    float prepEntry = na
+    float prepStop = na
+
+    // Opening: first volume-qualified breakout, then at most three bars.
+    if warmed and orCount == 6 and minuteOpen >= 600 and minuteEnd <= 645
+        if openState == 0 and close > orHigh and close > vw and volume >= 1.5 * precedingSixVolume
+            openState := 1
+            openWait := 0
+            openPullLow := na
+            openTouched := false
+            prepared := 1
+            prepEntry := close
+            prepStop := f_round_down(low - buffer)
+        else if openState == 1
+            openWait += 1
+            openPullLow := na(openPullLow) ? low : math.min(openPullLow, low)
+            openTouched := openTouched or low <= orHigh + buffer
+            if close < (orHigh + orLow) / 2
+                openState := 2
+                failure := 1
+            else if openWait > 3
+                openState := 2
+                failure := 2
+            else if openTouched and close > open and close > orHigh and close > high[1]
+                confirmed := 1
+                entry := close
+                stop := f_round_down(openPullLow - buffer)
+                openState := 2
+            else if openWait == 3
+                openState := 2
+                failure := 2
+    else if openState == 1 and minuteEnd > 645
+        openState := 2
+        failure := 2
+
+    // Midday: first 2+ bar declining segment; a one-bar dip is not a setup.
+    if warmed and not midUsed and minuteEnd >= 675 and minuteEnd <= 810
+        bool declining = close < close[1]
+        if declining and trend and close > vw
+            midCount += 1
+            midLow := midCount == 1 ? low : math.min(midLow, low)
+            midVolume += volume
+            midTouch := midTouch or low <= ema
+            if midCount == 2
+                prepared := 2
+                prepEntry := close
+                prepStop := f_round_down(midLow - buffer)
+            if midCount > 4
+                midUsed := true
+                failure := 3
+        else if midCount > 0
+            if midCount >= 2
+                float precedingVolume = 0.0
+                for i = 1 to midCount
+                    precedingVolume += volume[midCount + i]
+                bool volumePass = precedingVolume > 0 and midVolume < precedingVolume
+                if trend and close > vw and midTouch and volumePass and close > open and close > high[1]
+                    confirmed := 2
+                    entry := close
+                    stop := f_round_down(math.min(midLow, low) - buffer)
+                else
+                    failure := 3
+                midUsed := true
+            midCount := 0
+            midLow := na
+            midVolume := 0.0
+            midTouch := false
+    else if not midUsed and midCount >= 2 and minuteEnd > 810
+        midUsed := true
+        failure := 3
+
+    // Afternoon: freeze the pre-breakout box; never include breakout in box.
+    bool boxAbove = true
+    float boxVolume = 0.0
+    for i = 1 to 4
+        boxAbove := boxAbove and not na(vw[i]) and close[i] > vw[i] and f_day(time[i]) == currentDay
+        boxVolume += volume[i]
+    bool boxValid = dayCount >= 11 and boxAbove and precedingMove > 0 and previousBoxHigh > previousBoxLow and previousBoxHigh - previousBoxLow <= precedingMove * 0.5
+    if warmed and minuteEnd >= 870 and minuteEnd <= 915
+        if tailState == 0 and trend and boxValid and close > previousBoxHigh and volume >= 1.5 * boxVolume / 4
+            tailState := 1
+            tailWait := 0
+            tailHigh := previousBoxHigh
+            tailLow := previousBoxLow
+            prepared := 3
+            prepEntry := close
+            prepStop := f_round_down(tailLow - buffer)
+        else if tailState == 1
+            tailWait += 1
+            if close < vw or close <= tailLow or tailWait > 2
+                tailState := 2
+                failure := 4
+            else if low <= tailHigh + buffer and close > tailHigh
+                confirmed := 3
+                entry := close
+                stop := f_round_down(tailLow - buffer)
+                tailState := 2
+            else if tailWait == 2
+                tailState := 2
+                failure := 4
+    else if tailState == 1 and minuteEnd > 915
+        tailState := 2
+        failure := 4
+    [confirmed, prepared, failure, entry, stop, prepEntry, prepStop, orHigh, orLow, tailHigh, tailLow, vw, ema, priorDayHigh, dayLow, warmed, currentDay, time_close]
+
+f_confirmed_payload() =>
+    [signal, prep, fail, entry, stop, pe, ps, oh, ol, th, tl, vw, ema, dh, dl, warm, day, stamp] = f_engine()
+    // Offset ALL fields before lookahead_on, including the state-machine output.
+    [signal[1], prep[1], fail[1], entry[1], stop[1], pe[1], ps[1], oh[1], ol[1], th[1], tl[1], vw[1], ema[1], dh[1], dl[1], warm[1], day[1], stamp[1]]
+
+[signal5, prep5, fail5, entry5, stop5, pe5, ps5, oh5, ol5, th5, tl5, vw5, ema5, priorHigh5, dayLow5, warmed5, day5, stamp5] = request.security(regularTicker, "5", f_confirmed_payload(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+[premDay, premHigh, premLow, premCount] = request.security(extendedTicker, "1", f_premarket(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+[yesterdayHigh, yesterdayLow] = request.security(regularTicker, "D", [high[1], low[1]], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+bool supported = chart.is_standard and timeframe.isminutes and timeframe.multiplier == 1 and syminfo.currency == "USD" and (syminfo.type == "stock" or syminfo.type == "fund") and syminfo.timezone == TZ
+bool inRth = not na(time(timeframe.period, "0930-1600:23456", TZ))
+bool blackout = useBlackout and not na(time(timeframe.period, blackoutSession + ":23456", TZ))
+bool canNotify = supported and not pauseNew and not blockDay and not blackout
+int today = f_day(time)
+bool currentPayload = day5 == today and not na(stamp5)
+bool havePremarket = premDay == today and premCount > 0 and not na(premHigh)
+float effectivePremHigh = havePremarket ? premHigh : manualPremarketHigh > 0 ? manualPremarketHigh : na
+bool resistanceChecked = havePremarket or premarketChecked
+
+// varip preserves latches across realtime ticks. Ordinary `var` would roll back
+// a first-tick event and can send duplicate alerts or lose the live order card.
+varip int localDay = na
+varip int handledStamp = na
+varip int cardPhase = 0
+varip int cardStamp = na
+varip float cardEntry = na
+varip float cardStop = na
+varip float cardTarget = na
+varip int cardQty = 0
+varip int cardState = 0 // 0 waiting, 1 ready, 2 invalid, 3 rejected, 4 preparation
+varip string cardReason = "等待已完成的5分钟结构"
+varip bool cardExitSent = false
+varip int confirmBar = na
+varip int rejectBar = na
+varip int preparationBar = na
+varip int expirationBar = na
+varip int failurePhase = 0
+if na(localDay) or today != localDay
+    localDay := today
+    handledStamp := na
+    cardPhase := 0
+    cardStamp := na
+    cardEntry := na
+    cardStop := na
+    cardTarget := na
+    cardQty := 0
+    cardState := 0
+    cardReason := "等待已完成的5分钟结构"
+    cardExitSent := false
+    failurePhase := 0
+
+bool newPayload = currentPayload and (na(handledStamp) or stamp5 != handledStamp)
+if supported and inRth and newPayload
+    handledStamp := stamp5
+    if prep5 > 0 and cardState != 1 and canNotify
+        cardPhase := prep5
+        cardStamp := stamp5
+        cardEntry := pe5
+        cardStop := ps5
+        cardTarget := not na(pe5) and pe5 > ps5 ? f_round_up(pe5 + 3 * (pe5 - ps5)) : na
+        float prepD = pe5 - ps5
+        float prepCash = math.min(capitalCap, settledCash - reserveCash) - buyFee
+        cardQty := prepD > 0 and pe5 > 0 ? int(math.max(0, math.floor(math.min((riskBudget - buyFee - sellFee) / prepD, prepCash / pe5)))) : 0
+        cardState := 4
+        cardReason := "准备：价格和数量暂定，不是买入确认"
+        preparationBar := bar_index
+        cardExitSent := false
+        if enablePrepare and barstate.isrealtime
+            alert("准备 | " + syminfo.ticker + " | " + f_name(prep5) + " | 暂定E=" + f_price(cardEntry) + " S=" + f_price(cardStop) + " T=" + f_price(cardTarget) + " Q=" + str.tostring(cardQty) + " | 等待5分钟收盘确认；不得据此买入", alert.freq_all)
+    if fail5 > 0 and cardState == 4
+        failurePhase := fail5 <= 2 ? 1 : fail5 == 3 ? 2 : 3
+        if cardPhase == failurePhase
+            cardState := 2
+            cardReason := "候选结构失败／超过回踩期限；本时段不重试"
+            expirationBar := bar_index
+            if enableInvalid and canNotify and barstate.isrealtime
+                alert("结构失效 | " + syminfo.ticker + " | " + f_name(cardPhase) + " | " + cardReason + " | 若已有IBKR订单，先核对实际状态", alert.freq_all)
+    if signal5 > 0 and cardState != 1 and canNotify
+        cardPhase := signal5
+        cardStamp := stamp5
+        cardEntry := entry5
+        cardStop := stop5
+        float d = cardEntry - cardStop
+        cardTarget := d > 0 ? f_round_up(cardEntry + 3 * d) : na
+        float spendable = math.min(capitalCap, settledCash - reserveCash) - buyFee
+        cardQty := d > 0 and cardEntry > 0 ? int(math.max(0, math.floor(math.min((riskBudget - buyFee - sellFee) / d, spendable / cardEntry)))) : 0
+        cardExitSent := false
+        bool blockedByHigh = (not na(yesterdayHigh) and yesterdayHigh > cardEntry and yesterdayHigh <= cardTarget) or (not na(effectivePremHigh) and effectivePremHigh > cardEntry and effectivePremHigh <= cardTarget) or (not na(priorHigh5) and priorHigh5 > cardEntry and priorHigh5 <= cardTarget)
+        bool lateArrival = barstate.isrealtime and timenow >= cardStamp + 180000
+        bool priceGone = barstate.isrealtime and (close >= cardEntry + 0.5 * d or close <= cardStop)
+        cardReason := not warmed5 ? "指标未预热／量能数据不足" : na(yesterdayHigh) ? "缺少昨日常规时段数据" : not resistanceChecked ? "缺少盘前数据：须人工核对并填写参数" : na(d) or d <= 0 or cardStop <= 0 ? "止损距离无效" : cardQty < 1 ? "费用／现金／风险预算不允许一整股" : blockedByHigh ? "3R目标前存在已知阻力" : lateArrival ? "信号到达时已超过3分钟" : priceGone ? "信号到达时价格已越过失效价位" : "确认：限价固定；提交前核对IBKR报价"
+        bool accepted = warmed5 and not na(yesterdayHigh) and resistanceChecked and d > 0 and cardStop > 0 and cardQty >= 1 and not blockedByHigh and not lateArrival and not priceGone
+        cardState := accepted ? 1 : 3
+        if accepted
+            confirmBar := bar_index
+        else
+            rejectBar := bar_index
+        if accepted and barstate.isrealtime
+            alert("买入确认（不是成交） | " + syminfo.ticker + " | " + f_name(cardPhase) + " | 信号=" + str.format_time(cardStamp, "yyyy-MM-dd HH:mm", TZ) + " ET | LMT=" + f_price(cardEntry) + " Q=" + str.tostring(cardQty) + " SL=" + f_price(cardStop) + " TP=" + f_price(cardTarget) + " | 3分钟内核对并提交；价格到E+0.5D或SL则放弃；附带保护订单", alert.freq_all)
+
+// Live: current last-trade price. History: completed one-minute high/low only.
+int clockStamp = barstate.isrealtime ? timenow : time_close
+if supported and cardState == 1 and not na(cardStamp)
+    float chaseLevel = cardEntry + 0.5 * (cardEntry - cardStop)
+    bool chase = barstate.isrealtime ? close >= chaseLevel : barstate.isconfirmed and high >= chaseLevel
+    bool brokeStop = barstate.isrealtime ? close <= cardStop : barstate.isconfirmed and low <= cardStop
+    bool timedOut = clockStamp >= cardStamp + 3 * 60 * 1000
+    bool windowEnded = f_minute(clockStamp) > f_end_minute(cardPhase)
+    bool manualBlocked = blockDay or pauseNew or blackout
+    if chase or brokeStop or timedOut or windowEnded or manualBlocked
+        cardState := 2
+        cardReason := manualBlocked ? "人工暂停／消息时段" : chase and brokeStop ? "同分钟触及两失效价位；保守失效" : brokeStop ? "价格触及结构止损" : chase ? "价格已到E+0.5D；不追价" : windowEnded ? "已越过入场窗口" : "确认后已过3分钟；不是IBKR撤单结果"
+        expirationBar := bar_index
+        if enableInvalid and not blockDay and barstate.isrealtime
+            alert("信号失效／核对订单 | " + syminfo.ticker + " | " + f_name(cardPhase) + " | " + cardReason + " | 已提交或成交时先核对IBKR；不要据此重复下单或盲目平仓", alert.freq_all)
+
+if supported and enableExit and cardQty > 0 and not na(cardStamp) and cardState != 3 and cardState != 4 and not cardExitSent and f_day(clockStamp) == f_day(cardStamp) and f_minute(clockStamp) >= f_exit_minute(cardPhase)
+    cardExitSent := true
+    if barstate.isrealtime
+        alert("时间退出／核对持仓 | " + syminfo.ticker + " | " + f_name(cardPhase) + " | 若仍持仓请执行时间退出，确认清仓并处理残余卖单；助手不知道IBKR是否成交", alert.freq_all)
+
+color cardColor = cardState == 1 ? color.lime : cardState == 4 ? color.orange : color.gray
+bool todayLevels = supported and currentPayload
+plot(showLevels and todayLevels ? oh5 : na, "开盘区间上沿", color = color.new(color.blue, 20), style = plot.style_linebr)
+plot(showLevels and todayLevels ? ol5 : na, "开盘区间下沿", color = color.new(color.blue, 50), style = plot.style_linebr)
+plot(showLevels and todayLevels ? th5 : na, "尾盘整理上沿", color = color.purple, style = plot.style_linebr)
+plot(showLevels and todayLevels ? tl5 : na, "尾盘整理下沿", color = color.new(color.purple, 50), style = plot.style_linebr)
+plot(showLevels and todayLevels ? vw5 : na, "已确认5m VWAP（K线近似）", color = color.yellow, linewidth = 2, style = plot.style_linebr)
+plot(showLevels and todayLevels ? ema5 : na, "已确认5m EMA20", color = color.aqua, style = plot.style_linebr)
+plot(showLevels and supported ? yesterdayHigh : na, "昨日高点", color = color.new(color.red, 65), style = plot.style_linebr)
+plot(showLevels and supported ? yesterdayLow : na, "昨日低点", color = color.new(color.green, 65), style = plot.style_linebr)
+plot(showLevels and havePremarket ? premHigh : na, "盘前高点", color = color.new(color.red, 40), style = plot.style_linebr)
+plot(showLevels and havePremarket ? premLow : na, "盘前低点", color = color.new(color.green, 40), style = plot.style_linebr)
+plot(supported ? cardEntry : na, "订单卡买价", color = cardColor, linewidth = 2, style = plot.style_linebr)
+plot(supported ? cardStop : na, "订单卡止损", color = cardState == 1 ? color.red : color.gray, style = plot.style_linebr)
+plot(supported ? cardTarget : na, "订单卡止盈", color = cardState == 1 ? color.green : color.gray, style = plot.style_linebr)
+plotshape(supported and confirmBar == bar_index, title = "正式确认", style = shape.triangleup, location = location.belowbar, color = color.lime, size = size.small, text = "确认")
+plotshape(supported and rejectBar == bar_index, title = "预算或条件拒绝", style = shape.xcross, location = location.abovebar, color = color.red, size = size.tiny, text = "拒绝")
+plotshape(supported and preparationBar == bar_index, title = "准备提示", style = shape.circle, location = location.belowbar, color = color.orange, size = size.tiny, text = "准备")
+plotshape(supported and expirationBar == bar_index, title = "失效提示", style = shape.xcross, location = location.abovebar, color = color.gray, size = size.tiny, text = "失效")
+if supported and confirmBar == bar_index
+    label.new(bar_index, low, f_name(cardPhase) + "\nE " + f_price(cardEntry) + " × " + str.tostring(cardQty) + "\nS " + f_price(cardStop) + " / T " + f_price(cardTarget), style = label.style_label_up, color = color.new(color.green, 25), textcolor = color.white, size = size.small)
+
+var table panel = table.new(position.top_right, 2, 16, border_width = 1)
+f_row(int row, string heading, string value, color shade) =>
+    table.cell(panel, 0, row, heading, text_color = color.white, bgcolor = color.new(color.black, 20), text_size = size.small)
+    table.cell(panel, 1, row, value, text_color = shade, bgcolor = color.new(color.black, 20), text_size = size.small)
+if barstate.islast
+    float grossRisk = cardQty > 0 and not na(cardEntry) ? cardQty * (cardEntry - cardStop) : na
+    float estimatedLoss = grossRisk + buyFee + sellFee
+    float estimatedWin = cardQty > 0 ? cardQty * (cardTarget - cardEntry) - buyFee - sellFee : na
+    float netRatio = estimatedLoss > 0 ? estimatedWin / estimatedLoss : na
+    int secondsLeft = not na(cardStamp) ? int(math.max(0, (cardStamp + 180000 - clockStamp) / 1000)) : 0
+    string health = not supported ? "仅支持美东USD股票／ETF普通1分钟图" : blockDay ? "人工禁止交易" : pauseNew ? "新买入提醒已暂停（须重建提醒）" : blackout ? "消息暂停时段" : not inRth ? "常规时段外" : not currentPayload or not warmed5 ? "等待数据／预热" : not resistanceChecked ? "盘前缺数据：需人工核对" : "1m执行 · 已确认5m/15m"
+    f_row(0, "三时段助手 v1", syminfo.ticker, color.aqua)
+    f_row(1, "运行状态", health, supported ? color.white : color.red)
+    f_row(2, "策略", f_name(cardPhase), color.white)
+    f_row(3, "订单卡状态", cardReason, cardColor)
+    f_row(4, "信号／准备时间 ET", na(cardStamp) ? "—" : str.format_time(cardStamp, "MM-dd HH:mm", TZ), color.white)
+    f_row(5, "限价买入 E", f_price(cardEntry), cardColor)
+    f_row(6, "整股数量 Q", str.tostring(cardQty), cardColor)
+    f_row(7, "结构止损 S", f_price(cardStop), color.red)
+    f_row(8, "价格3R止盈 T", f_price(cardTarget), color.green)
+    f_row(9, "本金＋买入费", cardQty > 0 ? str.tostring(cardQty * cardEntry + buyFee, "#.00") + " USD" : "—", color.white)
+    f_row(10, "预估亏损（含费用）", cardQty > 0 ? str.tostring(estimatedLoss, "#.00") + " USD；未保证滑点" : "—", color.white)
+    f_row(11, "扣费后计划盈亏比", na(netRatio) ? "—" : str.tostring(netRatio, "#.00") + ":1", color.white)
+    f_row(12, "提交窗口剩余", cardState == 1 ? str.tostring(secondsLeft) + " 秒（依赖行情更新）" : "—", cardColor)
+    f_row(13, "预估往返费用／价差", str.tostring(buyFee + sellFee, "#.00") + " / " + str.tostring(spreadEstimate, "#.000") + " USD", color.orange)
+    f_row(14, "人工执行", "限价＋保护订单；提交后5分钟未成交核对取消", color.white)
+    f_row(15, "账户状态未知", "每日最多一笔由你管理；参数改变须重建提醒", color.orange)

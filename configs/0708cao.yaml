@@ -2,5 +2,16 @@
 # 新信号默认全部关闭，请在本次实验参数中显式启用。
 signals:
   version: 0708cao
-  enabled: []
+  enabled:
+    - 0708cao_sig1
+    - 0708cao_sig11
+    - 0708cao_sig2
+    - 0708cao_sig3
+    - 0708cao_sig4
+    - 0708cao_sig5
+    - 0708cao_sig6
+    - 0708cao_sig7
+    - 0708cao_sig8
+    - 0708cao_sig9
+    - 0708cao_sig10
   thresholds: {}

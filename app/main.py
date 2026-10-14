@@ -92,6 +92,13 @@ if page == "首页":
 elif page == "新建回测":
     st.subheader("设置并启动回测")
     bt = cfg["backtest"]
+    # A series change must rerun before the dependent form is submitted.
+    signal_version = st.selectbox("策略信号系列", ["legacy_v1", "0708cao"],
+                                  index=0 if cfg["signals"].get("version", "legacy_v1") == "legacy_v1" else 1,
+                                  format_func=lambda value: "现有信号（legacy_v1）" if value == "legacy_v1"
+                                  else "Excel 新信号（0708cao）",
+                                  key="signal_version")
+    st.caption("先选择信号系列，再填写回测参数并选择具体信号。0708cao 默认关闭，需要手动选择。")
     with st.form("new_backtest"):
         c1, c2 = st.columns(2)
         start = c1.date_input("开始日期", pd.Timestamp(bt.get("start", "2020-01-01")).date())
@@ -107,10 +114,6 @@ elif page == "新建回测":
         slippage = c3.number_input("滑点（基点）", min_value=0.0, max_value=9999.0, value=float(bt["slippage_bps"]))
         weekday = st.selectbox("调仓日", range(5), index=int(bt["rebalance_weekday"]),
                                format_func=lambda d: ["周一", "周二", "周三", "周四", "周五"][d])
-        signal_version = st.selectbox("策略信号系列", ["legacy_v1", "0708cao"],
-                                      index=0 if cfg["signals"].get("version", "legacy_v1") == "legacy_v1" else 1,
-                                      format_func=lambda value: "现有信号（legacy_v1）" if value == "legacy_v1"
-                                      else "Excel 新信号（0708cao）")
         if signal_version == "0708cao":
             active_signal_names, active_descriptions = cao_signal_names, cao_signal_descriptions
             default_signals = cfg["signals"]["enabled"] if cfg["signals"].get("version") == signal_version else []
@@ -123,7 +126,9 @@ elif page == "新建回测":
             active_signal_names, active_descriptions = legacy_signal_names, legacy_signal_descriptions
             default_signals = cfg["signals"]["enabled"] if cfg["signals"].get("version") == signal_version else []
         enabled = st.multiselect("选择信号", active_signal_names, default=default_signals,
-                                format_func=lambda name: active_descriptions[name], key=f"signals_{signal_version}")
+                                format_func=lambda name: (f"{name} · {active_descriptions[name]}"
+                                                          if signal_version == "0708cao" else active_descriptions[name]),
+                                key=f"signals_{signal_version}")
         if signal_version == "0708cao":
             st.warning("MACD 的 ±0.25 是对后复权价格的绝对阈值，复权尺度变化会影响信号命中。")
             if "0708cao_sig5" in enabled:
