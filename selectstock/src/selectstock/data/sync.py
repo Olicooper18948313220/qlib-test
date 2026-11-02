@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import time
 
 import pandas as pd
@@ -8,8 +9,9 @@ from filelock import FileLock
 from ..contracts import SyncReport
 from .calendar import NY, effective_asof, latest_closed, sessions, utc, utc_now
 from .database import Database
+from .download_guard import DownloadGuard, DownloadPaused
 from .providers import NasdaqDirectory, YahooProvider
-from .quality import validate_bars
+from .quality import metadata_fresh, validate_bars
 
 
 def retry(function, settings):
@@ -18,10 +20,25 @@ def retry(function, settings):
             return function()
         except (KeyboardInterrupt, SystemExit):
             raise
-        except Exception:
+        except Exception as exc:
+            if (
+                isinstance(exc, DownloadPaused)
+                or is_rate_limited(exc)
+                or isinstance(exc, (ValueError, TypeError))
+            ):
+                raise
             if attempt + 1 == settings["retries"]:
                 raise
-            time.sleep(settings["retry_backoff_seconds"] * 2**attempt)
+            delay = min(settings["retry_backoff_max_seconds"], settings["retry_backoff_seconds"] * 2**attempt)
+            time.sleep(delay + random.uniform(0, settings["request_jitter_seconds"]))
+
+
+def is_rate_limited(exc):
+    from yfinance.exceptions import YFRateLimitError
+
+    return isinstance(exc, YFRateLimitError) or getattr(
+        getattr(exc, "response", None), "status_code", None
+    ) in (429, 403)
 
 
 def fresh(observed_at, now, ttl):
@@ -47,11 +64,39 @@ def groups(missing, all_days, max_days):
 
 
 def sync(config, provider=None, directory=None, now=None, repair=False):
+    report = SyncReport()
+    if config["data"]["offline"]:
+        return _sync(config, provider, directory, now, repair, report)
+    guard = DownloadGuard(config["data"])
+    owned_provider = provider is None
+    try:
+        guard.check()
+        provider = provider or YahooProvider(config["data"]["include_extended_hours"], guard=guard)
+        return _sync(config, provider, directory, now, repair, report)
+    except Exception as exc:
+        if is_rate_limited(exc):
+            try:
+                guard.pause("数据源返回限流，停止本轮下载")
+            except DownloadPaused as paused:
+                exc = paused
+        if not isinstance(exc, DownloadPaused):
+            raise
+        report.paused = True
+        report.pause_reason = exc.reason
+        report.resume_after = exc.resume_after
+        report.warnings.append(str(exc))
+        return report
+    finally:
+        report.network_requests = guard.request_count
+        if owned_provider and provider is not None:
+            provider.close()
+
+
+def _sync(config, provider, directory, now, repair, report):
     d = config["data"]
     now = utc(now) if now is not None else utc_now()
     db = Database(d["database"])
     db.path.parent.mkdir(parents=True, exist_ok=True)
-    report = SyncReport()
     if d["offline"]:
         if not db.path.exists():
             raise FileNotFoundError("offline 模式需要已有本地数据库；可先运行离线示例")
@@ -59,7 +104,6 @@ def sync(config, provider=None, directory=None, now=None, repair=False):
         return report
     with FileLock(str(db.path) + ".lock", timeout=5):
         db.initialize()
-        provider = provider or YahooProvider(d["include_extended_hours"])
         if not d["symbols"]:
             records, at = db.universe()
             if not fresh(at, now, d["universe_ttl_days"]):
@@ -98,15 +142,17 @@ def sync(config, provider=None, directory=None, now=None, repair=False):
                     report.requested += 1
                     if tf == "1d" and current:
                         previous = db.metadata(symbol)
-                        if not fresh(previous.get("observed_at"), now, d["metadata_ttl_days"]):
+                        if not metadata_fresh(previous, asof, now, d["metadata_ttl_days"]):
                             try:
                                 metadata = retry(lambda: provider.metadata(symbol), d)
                                 if metadata.get("market_cap") is None:
                                     raise ValueError("Yahoo 未返回市值")
+                                metadata["session_asof"] = asof
                                 db.save_metadata(symbol, metadata, now)
                             except Exception as exc:
+                                if isinstance(exc, DownloadPaused) or is_rate_limited(exc):
+                                    raise
                                 report.metadata_failures.append({"symbol": symbol, "error": str(exc)})
-                            time.sleep(d["request_pause_seconds"])
                     missing = set(all_days) - (set() if repair else db.completed(symbol, tf))
                     if not missing:
                         report.cached += 1
@@ -192,11 +238,12 @@ def sync(config, provider=None, directory=None, now=None, repair=False):
                                         {"symbol": symbol, "timeframe": tf, "day": day, "error": detail}
                                     )
                         except Exception as exc:
+                            if isinstance(exc, DownloadPaused) or is_rate_limited(exc):
+                                raise
                             db.commit_history(
                                 symbol, tf, pd.DataFrame(), [(day, "failed", str(exc)) for day in days]
                             )
                             report.failures.append(
                                 {"symbol": symbol, "timeframe": tf, "start": lo, "end": hi, "error": str(exc)}
                             )
-                        time.sleep(d["request_pause_seconds"])
     return report

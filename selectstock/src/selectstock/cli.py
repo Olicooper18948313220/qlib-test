@@ -47,6 +47,8 @@ def main():
         scan = run_scans(config, args.enabled.split(",") if args.enabled else None)
         result = {"asof": scan.asof, "coverage": scan.coverage, "output": str(export_watchlists(scan))}
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    if args.command == "update" and result["paused"]:
+        raise SystemExit(2)
     if args.command == "update" and (result["failures"] or result["metadata_failures"]):
         raise SystemExit(1)
 

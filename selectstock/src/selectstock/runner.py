@@ -9,7 +9,7 @@ from .config import load_config, validate_config
 from .contracts import ScanResult
 from .data.calendar import effective_asof, latest_closed, session_close, sessions, utc, utc_now, week_info
 from .data.database import Database
-from .data.quality import data_issues
+from .data.quality import data_issues, metadata_fresh
 from .data.sync import sync
 from .exports import export_watchlists
 from .indicators import compute_metrics
@@ -80,9 +80,7 @@ def run_scans(config=None, enabled=None, *, persist=True, now=None):
                     issues.append("missing_trading_sessions")
                 if not metadata:
                     issues.append("missing_point_in_time_metadata" if not current else "missing_metadata")
-                elif current and now - utc(metadata["observed_at"]) >= pd.Timedelta(
-                    days=config["data"]["metadata_ttl_days"]
-                ):
+                elif current and not metadata_fresh(metadata, asof, now, config["data"]["metadata_ttl_days"]):
                     issues.append("stale_metadata")
                 metrics = compute_metrics(
                     bars, settings if name == "leader" else None, settings if name == "potent" else None

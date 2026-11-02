@@ -30,7 +30,7 @@ def load_config(root: str | Path | None = None, overrides: dict | None = None) -
     }
     result = merge(result, overrides or {})
     result["root"] = str(root)
-    for key in ("database", "output_dir"):
+    for key in ("database", "output_dir", "download_state"):
         value = Path(result["data"][key]).expanduser()
         result["data"][key] = str(value if value.is_absolute() else root / value)
     validate_config(result)
@@ -43,12 +43,36 @@ def validate_config(config):
         raise ValueError("当前 provider 仅支持 yahoo")
     if not d["timeframes"] or set(d["timeframes"]) - TIMEFRAMES:
         raise ValueError("timeframes 必须来自 1d/15m/5m/1m")
-    for key in ("read_bars", "batch_size", "retries", "metadata_ttl_days", "universe_ttl_days"):
+    for key in (
+        "read_bars",
+        "batch_size",
+        "retries",
+        "metadata_ttl_days",
+        "universe_ttl_days",
+        "download_batch_requests",
+        "max_requests_per_run",
+        "max_consecutive_failures",
+    ):
         if type(d[key]) is not int or d[key] < 1:
             raise ValueError(f"{key} 必须为正整数")
-    for key in ("request_pause_seconds", "retry_backoff_seconds", "close_delay_minutes"):
+    for key in (
+        "request_pause_seconds",
+        "request_jitter_seconds",
+        "download_batch_pause_seconds",
+        "retry_backoff_seconds",
+        "retry_backoff_max_seconds",
+        "close_delay_minutes",
+    ):
         if not isinstance(d[key], (int, float)) or not math.isfinite(d[key]) or d[key] < 0:
             raise ValueError(f"{key} 必须为有限非负数")
+    for key in ("rate_limit_cooldown_seconds", "failure_cooldown_seconds", "budget_cooldown_seconds"):
+        if (
+            isinstance(d[key], bool)
+            or not isinstance(d[key], (int, float))
+            or not math.isfinite(d[key])
+            or d[key] <= 0
+        ):
+            raise ValueError(f"{key} 必须为有限正数")
     for tf in TIMEFRAMES:
         if type(d["history_days"][tf]) is not int or d["history_days"][tf] < 1:
             raise ValueError(f"history_days.{tf} 必须为正整数")

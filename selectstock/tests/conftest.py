@@ -14,11 +14,13 @@ def config(tmp_path):
         overrides={
             "data": {
                 "database": str(tmp_path / "market.db"),
+                "download_state": str(tmp_path / "download_guard.json"),
                 "output_dir": str(tmp_path / "runs"),
                 "symbols": ["AAA", "BBB"],
                 "end": "2026-10-30",
                 "history_days": {"1d": 400},
                 "request_pause_seconds": 0,
+                "request_jitter_seconds": 0,
                 "retry_backoff_seconds": 0,
                 "retries": 1,
             }

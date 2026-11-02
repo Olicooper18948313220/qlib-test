@@ -1,4 +1,20 @@
+import json
+
 import numpy as np
+import pandas as pd
+
+from .calendar import utc
+
+
+def metadata_fresh(snapshot, asof, now, ttl_days):
+    if not snapshot:
+        return False
+    observed = utc(snapshot["observed_at"])
+    if observed > now:
+        return False
+    if now - observed < pd.Timedelta(days=ttl_days):
+        return True
+    return json.loads(snapshot.get("payload") or "{}").get("session_asof") == asof
 
 
 def validate_bars(frame):

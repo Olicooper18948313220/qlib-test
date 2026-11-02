@@ -22,6 +22,10 @@ class SyncReport:
     failures: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     metadata_failures: list = field(default_factory=list)
+    paused: bool = False
+    pause_reason: str | None = None
+    resume_after: str | None = None
+    network_requests: int = 0
 
     def to_dict(self):
         return asdict(self)
