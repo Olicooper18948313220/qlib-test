@@ -1,5 +1,7 @@
 # qlib_quant：可修改的本地量化交易框架
 
+美股 Martin Luk 扫描与 Notebook 研究见独立子项目 [selectstock](selectstock/README.md)，提供 Leader、Potent、四周期增量行情缓存及 TradingView 名单导出。
+
 这是从 `D:\quanttrade20260207` 提炼出的新项目。它把数据、因子、选股信号、组合、回测和报告拆开，方便逐层理解和替换。
 
 ## 先看框架和策略

@@ -1,0 +1,32 @@
+leader:
+  enabled: true
+  min_market_cap: 100000000
+  market_cap_op: ">"
+  average_volume_days: 10
+  min_average_volume: 500000
+  average_volume_op: ">"
+  min_week_turnover: 300000000
+  week_turnover_op: ">"
+  performance_days: 30
+  week_policy: current
+  sort_by: performance_1m
+  ascending: false
+potent:
+  enabled: true
+  min_market_cap: 100000000
+  market_cap_op: ">"
+  ema_fast: 21
+  ema_slow: 50
+  ema_fast_op: ">="
+  ema_slow_op: ">"
+  volatility_days: 7
+  min_volatility: 3.5
+  volatility_op: ">"
+  min_day_turnover: 50000000
+  day_turnover_op: ">"
+  open_change_lower: -0.5
+  open_change_upper: 0.5
+  outside_inclusive: false
+  excluded_industries: []          # 原截图未展开清单，不推测排除项
+  sort_by: change_pct
+  ascending: false
