@@ -1,4 +1,5 @@
 from functools import lru_cache
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -51,6 +52,86 @@ class YahooProvider:
         self._ticker.cache_clear()
         if self.session is not None:
             self.session.close()
+
+    def metadata_pages(self, symbols):
+        """Page US listing exchanges without price, market-cap or volume exclusions."""
+        wanted = {symbol.replace(".", "-").upper(): symbol for symbol in symbols}
+        query = yf.EquityQuery("is-in", ["exchange", "NMS", "NGM", "NCM", "NYQ", "ASE"])
+        offset = 0
+        seen = set()
+        while wanted:
+            result = self._call(
+                lambda: yf.screen(
+                    query, size=250, offset=offset, sortField="ticker", sortAsc=True, session=self.session
+                )
+            )
+            quotes = result.get("quotes", [])
+            total = result.get("total")
+            if not isinstance(total, int) or total < 0:
+                raise ValueError("批量报价响应缺少 total")
+            if not quotes:
+                if offset < total:
+                    raise ValueError("批量报价在分页完成前返回空页")
+                break
+            page = []
+            new_symbols = {q.get("symbol") for q in quotes} - seen
+            if not new_symbols:
+                raise ValueError("批量报价重复返回同一页")
+            seen.update(new_symbols)
+            for quote in quotes:
+                key = str(quote.get("symbol", "")).replace(".", "-").upper()
+                symbol = wanted.pop(key, None)
+                if symbol is None:
+                    continue
+                cap = quote.get("marketCap")
+                if not isinstance(cap, (int, float)) or not pd.notna(cap) or cap <= 0:
+                    continue
+                timezone = quote.get("exchangeTimezoneName")
+                self.seed_timezone(symbol, timezone)
+                first_trade_date = None
+                first = quote.get("firstTradeDateMilliseconds")
+                if isinstance(first, (int, float)) and pd.notna(first) and first > 0:
+                    try:
+                        first_trade_date = (
+                            pd.Timestamp(first, unit="ms", tz="UTC")
+                            .tz_convert(timezone or NY)
+                            .date()
+                            .isoformat()
+                        )
+                    except (ValueError, OverflowError, KeyError):
+                        pass
+                page.append(
+                    (
+                        symbol,
+                        {
+                            "market_cap": cap,
+                            "exchange": EXCHANGE_MAP.get(quote.get("exchange"), ""),
+                            "industry": quote.get("industry"),
+                            "quote_type": quote.get("quoteType"),
+                            "shares_outstanding": quote.get("sharesOutstanding"),
+                            "exchange_timezone": timezone,
+                            "first_trade_date": first_trade_date,
+                            "source": "yahoo_bulk_quote",
+                        },
+                    )
+                )
+            if page:
+                yield page
+            offset += len(quotes)
+            if offset >= total:
+                break
+
+    @staticmethod
+    def seed_timezone(symbol, timezone):
+        if not timezone:
+            return
+        try:
+            ZoneInfo(timezone)
+        except (ValueError, KeyError, TypeError):
+            return
+        from yfinance import cache
+
+        cache.get_tz_cache().store(symbol.replace(".", "-").upper(), timezone)
 
     def history(self, symbol, timeframe, start, end):
         frame = self._call(

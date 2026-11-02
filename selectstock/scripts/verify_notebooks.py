@@ -55,6 +55,7 @@ def _validation_no_network(*args, **kwargs):
     raise AssertionError("Offline validation must not request market data")
 YahooProvider.history = _validation_no_network
 YahooProvider.metadata = _validation_no_network
+YahooProvider.metadata_pages = _validation_no_network
 NasdaqDirectory.fetch = _validation_no_network
 """),
     )

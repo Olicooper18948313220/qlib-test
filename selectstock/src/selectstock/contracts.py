@@ -26,6 +26,8 @@ class SyncReport:
     pause_reason: str | None = None
     resume_after: str | None = None
     network_requests: int = 0
+    metadata_bulk_saved: int = 0
+    metadata_deferred: int = 0
 
     def to_dict(self):
         return asdict(self)

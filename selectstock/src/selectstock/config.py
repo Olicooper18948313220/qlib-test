@@ -52,9 +52,15 @@ def validate_config(config):
         "download_batch_requests",
         "max_requests_per_run",
         "max_consecutive_failures",
+        "metadata_batch_min_symbols",
+        "metadata_failure_retry_minutes",
     ):
         if type(d[key]) is not int or d[key] < 1:
             raise ValueError(f"{key} 必须为正整数")
+    if d["metadata_mode"] not in {"auto", "individual"}:
+        raise ValueError("metadata_mode 必须为 auto/individual")
+    if type(d["metadata_fallback_limit"]) is not int or d["metadata_fallback_limit"] < 0:
+        raise ValueError("metadata_fallback_limit 必须为非负整数")
     for key in (
         "request_pause_seconds",
         "request_jitter_seconds",

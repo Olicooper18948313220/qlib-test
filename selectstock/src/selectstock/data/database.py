@@ -28,6 +28,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS instruments(symbol TEXT PRIMARY KEY, exchange TEXT NOT NULL, name TEXT, source_symbol TEXT, instrument_type TEXT);
 CREATE TABLE IF NOT EXISTS universe_snapshots(observed_at TEXT PRIMARY KEY, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS security_snapshots(symbol TEXT, observed_at TEXT, market_cap REAL, industry TEXT, payload TEXT, PRIMARY KEY(symbol,observed_at));
+CREATE TABLE IF NOT EXISTS metadata_failures(symbol TEXT PRIMARY KEY, attempted_at TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS bars(symbol TEXT, timeframe TEXT, ts TEXT, session_date TEXT, session TEXT, open REAL, high REAL, low REAL, close REAL, volume REAL, is_final INTEGER, adjustment TEXT, source TEXT, PRIMARY KEY(symbol,timeframe,ts));
 CREATE INDEX IF NOT EXISTS bars_window ON bars(symbol,timeframe,session_date,ts);
 CREATE TABLE IF NOT EXISTS corporate_actions(symbol TEXT, day TEXT, split REAL, dividend REAL, observed_at TEXT, PRIMARY KEY(symbol,day));
@@ -112,19 +113,46 @@ class Database:
             return result
 
     def save_metadata(self, symbol, metadata, observed_at=None):
+        self.save_metadata_many([(symbol, metadata)], observed_at)
+
+    def save_metadata_many(self, records, observed_at=None):
         at = utc(observed_at).isoformat() if observed_at is not None else utc_now().isoformat()
-        cap = metadata.get("market_cap")
-        if cap is not None and (not isinstance(cap, (float, int)) or not pd.notna(cap) or cap <= 0):
-            cap = None
+        with self.connect(True) as con:
+            for symbol, metadata in records:
+                cap = metadata.get("market_cap")
+                if cap is not None and (not isinstance(cap, (float, int)) or not pd.notna(cap) or cap <= 0):
+                    cap = None
+                # A bulk quote may not include industry; retain an existing known industry.
+                industry = metadata.get("industry")
+                if not industry:
+                    old = con.execute(
+                        "SELECT industry FROM security_snapshots WHERE symbol=? ORDER BY observed_at DESC LIMIT 1",
+                        (symbol,),
+                    ).fetchone()
+                    industry = old[0] if old else None
+                con.execute(
+                    "INSERT OR REPLACE INTO security_snapshots VALUES (?,?,?,?,?)",
+                    (symbol, at, cap, industry, json_text(metadata)),
+                )
+                con.execute("DELETE FROM metadata_failures WHERE symbol=?", (symbol,))
+                if metadata.get("exchange"):
+                    con.execute(
+                        "UPDATE instruments SET exchange=? WHERE symbol=?", (metadata["exchange"], symbol)
+                    )
+
+    def metadata_retry_due(self, symbol, now, minutes):
+        with self.connect() as con:
+            row = con.execute(
+                "SELECT attempted_at FROM metadata_failures WHERE symbol=?", (symbol,)
+            ).fetchone()
+        return not row or utc(now) >= utc(row[0]) + pd.Timedelta(minutes=minutes)
+
+    def record_metadata_failure(self, symbol, detail, observed_at):
         with self.connect(True) as con:
             con.execute(
-                "INSERT OR REPLACE INTO security_snapshots VALUES (?,?,?,?,?)",
-                (symbol, at, cap, metadata.get("industry"), json_text(metadata)),
+                "INSERT OR REPLACE INTO metadata_failures VALUES (?,?,?)",
+                (symbol, utc(observed_at).isoformat(), detail),
             )
-            if metadata.get("exchange"):
-                con.execute(
-                    "UPDATE instruments SET exchange=? WHERE symbol=?", (metadata["exchange"], symbol)
-                )
 
     def metadata(self, symbol, before=None):
         with self.connect() as con:
@@ -160,7 +188,7 @@ class Database:
             return {
                 r[0]
                 for r in con.execute(
-                    "SELECT day FROM sync_state WHERE symbol=? AND timeframe=? AND status='complete'",
+                    "SELECT day FROM sync_state WHERE symbol=? AND timeframe=? AND status IN ('complete','not_listed')",
                     (symbol, tf),
                 )
             }

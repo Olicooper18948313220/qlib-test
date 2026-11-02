@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 import time
 
@@ -63,6 +64,47 @@ def groups(missing, all_days, max_days):
     return result
 
 
+def metadata_ready(snapshot, config, asof, now):
+    if not metadata_fresh(snapshot, asof, now, config["data"]["metadata_ttl_days"]):
+        return False
+    needs_industry = (
+        config["scanners"]["potent"]["enabled"] and config["scanners"]["potent"]["excluded_industries"]
+    )
+    return not needs_industry or bool(snapshot.get("industry"))
+
+
+def prefetch_metadata(config, provider, db, records, report, asof, now):
+    d = config["data"]
+    if (
+        d["metadata_mode"] != "auto"
+        or len(records) < d["metadata_batch_min_symbols"]
+        or not hasattr(provider, "metadata_pages")
+        or (config["scanners"]["potent"]["enabled"] and config["scanners"]["potent"]["excluded_industries"])
+    ):
+        return False
+    wanted = [
+        r["symbol"]
+        for r in records
+        if not metadata_ready(db.metadata(r["symbol"]), config, asof, now)
+        and db.metadata_retry_due(r["symbol"], now, d["metadata_failure_retry_minutes"])
+    ]
+    if not wanted:
+        return True
+    if len(wanted) < d["metadata_batch_min_symbols"]:
+        return False
+    try:
+        for page in provider.metadata_pages(wanted):
+            for _, metadata in page:
+                metadata["session_asof"] = asof
+            db.save_metadata_many(page, now)
+            report.metadata_bulk_saved += len(page)
+    except Exception as exc:
+        if isinstance(exc, DownloadPaused) or is_rate_limited(exc):
+            raise
+        report.warnings.append(f"批量资料未完全获取，使用限量补查；所有股票仍保留历史下载任务: {exc}")
+    return True
+
+
 def sync(config, provider=None, directory=None, now=None, repair=False):
     report = SyncReport()
     if config["data"]["offline"]:
@@ -120,6 +162,12 @@ def _sync(config, provider, directory, now, repair, report):
                 )
         asof = effective_asof(config, now)
         current = asof == latest_closed(now, d["close_delay_minutes"])
+        bulk_mode = (
+            prefetch_metadata(config, provider, db, records, report, asof, now)
+            if current and "1d" in d["timeframes"]
+            else False
+        )
+        metadata_fallbacks = 0
         daily_symbols = [r["symbol"] for r in records]
         names = [n for n, s in config["scanners"].items() if s["enabled"]]
         minute_symbols = sorted(set(db.latest_selected(names)) | set(config["watchlist"]["symbols"]))
@@ -142,18 +190,48 @@ def _sync(config, provider, directory, now, repair, report):
                     report.requested += 1
                     if tf == "1d" and current:
                         previous = db.metadata(symbol)
-                        if not metadata_fresh(previous, asof, now, d["metadata_ttl_days"]):
-                            try:
-                                metadata = retry(lambda: provider.metadata(symbol), d)
-                                if metadata.get("market_cap") is None:
-                                    raise ValueError("Yahoo 未返回市值")
-                                metadata["session_asof"] = asof
-                                db.save_metadata(symbol, metadata, now)
-                            except Exception as exc:
-                                if isinstance(exc, DownloadPaused) or is_rate_limited(exc):
-                                    raise
-                                report.metadata_failures.append({"symbol": symbol, "error": str(exc)})
-                    missing = set(all_days) - (set() if repair else db.completed(symbol, tf))
+                        if not metadata_ready(previous, config, asof, now):
+                            due = db.metadata_retry_due(symbol, now, d["metadata_failure_retry_minutes"])
+                            if not due or (bulk_mode and metadata_fallbacks >= d["metadata_fallback_limit"]):
+                                report.metadata_deferred += 1
+                                report.metadata_failures.append(
+                                    {
+                                        "symbol": symbol,
+                                        "error": "资料待核查：已暂缓重复请求或达到逐股补查预算",
+                                    }
+                                )
+                                due = False
+                            if due:
+                                metadata_fallbacks += 1
+                                try:
+                                    metadata = retry(lambda: provider.metadata(symbol), d)
+                                    if not metadata.get("market_cap") or metadata["market_cap"] <= 0:
+                                        raise ValueError("Yahoo 未返回有效市值")
+                                    metadata["session_asof"] = asof
+                                    db.save_metadata(symbol, metadata, now)
+                                except Exception as exc:
+                                    if isinstance(exc, DownloadPaused) or is_rate_limited(exc):
+                                        raise
+                                    db.record_metadata_failure(symbol, str(exc), now)
+                                    report.metadata_failures.append({"symbol": symbol, "error": str(exc)})
+                    completed = set() if repair else db.completed(symbol, tf)
+                    listing = json.loads(db.metadata(symbol).get("payload") or "{}").get("first_trade_date")
+                    if listing:
+                        first_existing = db.first_day(symbol, tf)
+                        # Preserve existing evidence when a ticker was reused or source dates disagree.
+                        if first_existing is None or first_existing >= listing:
+                            before_listing = [
+                                day for day in all_days if day < listing and day not in completed
+                            ]
+                            if before_listing:
+                                db.commit_history(
+                                    symbol,
+                                    tf,
+                                    pd.DataFrame(),
+                                    [(day, "not_listed", "before_first_trade") for day in before_listing],
+                                )
+                                completed.update(before_listing)
+                    missing = set(all_days) - completed
                     if not missing:
                         report.cached += 1
                         continue

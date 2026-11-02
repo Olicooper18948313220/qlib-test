@@ -7,7 +7,7 @@ from .calendar import utc
 
 
 def metadata_fresh(snapshot, asof, now, ttl_days):
-    if not snapshot:
+    if not snapshot or snapshot.get("market_cap") is None:
         return False
     observed = utc(snapshot["observed_at"])
     if observed > now:

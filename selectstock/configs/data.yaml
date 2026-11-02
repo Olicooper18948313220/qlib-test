@@ -8,10 +8,10 @@ history_days: {1d: 730, 15m: 30, 5m: 30, 1m: 7}
 read_bars: 252
 batch_size: 25
 download_state: data/download_guard.json # 两个 Notebook 与不同数据库共用限速/冷却状态
-request_pause_seconds: 1.5         # 实际 HTTP 请求的最小起始间隔，非每只股票间隔
-request_jitter_seconds: 0.5
-download_batch_requests: 50
-download_batch_pause_seconds: 15
+request_pause_seconds: 1.0         # 实际 HTTP 请求的最小起始间隔，非每只股票间隔
+request_jitter_seconds: 0.2
+download_batch_requests: 100
+download_batch_pause_seconds: 10
 max_requests_per_run: 600          # 预算用尽暂停，之后可续传
 budget_cooldown_seconds: 60
 rate_limit_cooldown_seconds: 900   # HTTP 429/403 至少冷却 15 分钟
@@ -21,6 +21,10 @@ retries: 3
 retry_backoff_seconds: 5
 retry_backoff_max_seconds: 60
 metadata_ttl_days: 1
+metadata_mode: auto                # >=20只且资料需刷新时，使用无市值过滤的批量报价
+metadata_batch_min_symbols: 20
+metadata_fallback_limit: 10         # 批量缺失时每轮最多逐股补查数量
+metadata_failure_retry_minutes: 60 # 无市值/接口缺失的股票暂缓重复查资料，仍下载其历史
 universe_ttl_days: 1
 include_extended_hours: true
 close_delay_minutes: 30
