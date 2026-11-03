@@ -54,9 +54,12 @@ def validate_config(config):
         "max_consecutive_failures",
         "metadata_batch_min_symbols",
         "metadata_failure_retry_minutes",
+        "max_recovery_attempts",
     ):
         if type(d[key]) is not int or d[key] < 1:
             raise ValueError(f"{key} 必须为正整数")
+    if type(d["auto_resume"]) is not bool:
+        raise ValueError("auto_resume 必须为布尔值")
     if d["metadata_mode"] not in {"auto", "individual"}:
         raise ValueError("metadata_mode 必须为 auto/individual")
     if type(d["metadata_fallback_limit"]) is not int or d["metadata_fallback_limit"] < 0:

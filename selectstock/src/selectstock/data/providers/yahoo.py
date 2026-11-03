@@ -22,6 +22,7 @@ class YahooProvider:
     def __init__(self, include_extended_hours=True, guard=None):
         self.include_extended_hours = include_extended_hours
         self.guard = guard
+        self.metadata_offset = 0
         self.session = guarded_session(guard) if guard is not None else None
 
     @lru_cache(maxsize=64)
@@ -29,6 +30,9 @@ class YahooProvider:
         return yf.Ticker(symbol.replace(".", "-"), session=self.session)
 
     def _call(self, function):
+        return self.guard.run(lambda: self._call_once(function)) if self.guard else self._call_once(function)
+
+    def _call_once(self, function):
         if self.guard:
             self.guard.check()
         try:
@@ -57,7 +61,7 @@ class YahooProvider:
         """Page US listing exchanges without price, market-cap or volume exclusions."""
         wanted = {symbol.replace(".", "-").upper(): symbol for symbol in symbols}
         query = yf.EquityQuery("is-in", ["exchange", "NMS", "NGM", "NCM", "NYQ", "ASE"])
-        offset = 0
+        offset = self.metadata_offset
         seen = set()
         while wanted:
             result = self._call(
@@ -115,9 +119,10 @@ class YahooProvider:
                         },
                     )
                 )
+            offset += len(quotes)
+            self.metadata_offset = offset
             if page:
                 yield page
-            offset += len(quotes)
             if offset >= total:
                 break
 
@@ -179,7 +184,15 @@ class YahooProvider:
 
     def metadata(self, symbol):
         info = self._call(lambda: self._ticker(symbol).get_info())
+        timezone = info.get("exchangeTimezoneName")
+        first = info.get("firstTradeDateEpochUtc")
+        first_date = None
+        if isinstance(first, (int, float)) and pd.notna(first) and first > 0:
+            first_date = pd.Timestamp(first, unit="s", tz="UTC").tz_convert(timezone or NY).date().isoformat()
+        self.seed_timezone(symbol, timezone)
         return {
+            "first_trade_date": first_date,
+            "exchange_timezone": timezone,
             "market_cap": info.get("marketCap"),
             "industry": info.get("industry"),
             "exchange": EXCHANGE_MAP.get(info.get("exchange"), ""),

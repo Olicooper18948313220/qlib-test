@@ -18,10 +18,10 @@ from .scanners import REGISTRY
 __all__ = ["update_data", "load_bars", "run_scans", "export_watchlists", "check_data"]
 
 
-def update_data(config=None, *, provider=None, directory=None, now=None, repair=False):
+def update_data(config=None, *, provider=None, directory=None, now=None, repair=False, progress=None):
     config = config or load_config()
     validate_config(config)
-    return sync(config, provider, directory, now, repair)
+    return sync(config, provider, directory, now, repair, progress)
 
 
 def load_bars(symbol, timeframe="1d", start=None, end=None, limit=None, *, config=None, database=None):
@@ -48,6 +48,8 @@ def run_scans(config=None, enabled=None, *, persist=True, now=None):
     asof = effective_asof(config, now)
     db = Database(config["data"]["database"])
     records = db.instruments(sorted(set(config["data"]["symbols"])) or None)
+    universe, _ = db.universe()
+    active_symbols = {r["symbol"] for r in universe} if universe else None
     current = asof == latest_closed(now, config["data"]["close_delay_minutes"])
     frames = {name: [] for name in enabled}
     for offset in range(0, len(records), config["data"]["batch_size"]):
@@ -73,6 +75,13 @@ def run_scans(config=None, enabled=None, *, persist=True, now=None):
                     settings.get("volatility_days", 0) + 5,
                 )
                 bars = db.load_bars(symbol, "1d", end=target, limit=read_count)
+                # Validate only the actual indicator window, not unrelated older rows requested for display.
+                if name == "leader" and not bars.empty:
+                    anchor = pd.Timestamp(target) - pd.Timedelta(days=settings["performance_days"])
+                    dates = pd.to_datetime(bars["session_date"])
+                    position = max(0, int(dates.searchsorted(anchor, side="right")) - 1)
+                    position = min(position, max(0, len(bars) - warmup))
+                    bars = bars.iloc[position:].copy()
                 issues = data_issues(bars, target, warmup)
                 if not bars.empty and set(sessions(bars.iloc[0]["session_date"], target)) - set(
                     bars["session_date"]
@@ -82,8 +91,25 @@ def run_scans(config=None, enabled=None, *, persist=True, now=None):
                     issues.append("missing_point_in_time_metadata" if not current else "missing_metadata")
                 elif current and not metadata_fresh(metadata, asof, now, config["data"]["metadata_ttl_days"]):
                     issues.append("stale_metadata")
-                metrics = compute_metrics(
-                    bars, settings if name == "leader" else None, settings if name == "potent" else None
+                if current and active_symbols is not None and symbol not in active_symbols:
+                    issues.append("inactive_directory")
+                metrics = (
+                    {}
+                    if any(
+                        x.startswith(
+                            (
+                                "missing_daily",
+                                "insufficient_warmup",
+                                "missing_trading",
+                                "stale_daily",
+                                "inactive",
+                            )
+                        )
+                        for x in issues
+                    )
+                    else compute_metrics(
+                        bars, settings if name == "leader" else None, settings if name == "potent" else None
+                    )
                 )
                 metrics.update(
                     market_cap=metadata.get("market_cap"),
@@ -130,6 +156,7 @@ def run_scans(config=None, enabled=None, *, persist=True, now=None):
             "passed": int(frame["status"].eq("passed").sum()),
             "failed": int(frame["status"].eq("failed").sum()),
             "insufficient": int(frame["status"].eq("insufficient").sum()),
+            "skipped": int(frame["status"].eq("skipped").sum()),
         }
         for name, frame in frames.items()
     }

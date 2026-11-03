@@ -36,7 +36,9 @@ def main():
         Database(config["data"]["database"]).initialize()
         result = {"database": config["data"]["database"]}
     elif args.command == "update":
-        result = update_data(config, repair=args.repair).to_dict()
+        from .progress import DownloadProgress
+
+        result = update_data(config, repair=args.repair, progress=DownloadProgress()).to_dict()
     elif args.command == "check":
         result = check_data(config)
     else:
@@ -47,6 +49,8 @@ def main():
         scan = run_scans(config, args.enabled.split(",") if args.enabled else None)
         result = {"asof": scan.asof, "coverage": scan.coverage, "output": str(export_watchlists(scan))}
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    if args.command == "update" and result["stopped"]:
+        raise SystemExit(130)
     if args.command == "update" and result["paused"]:
         raise SystemExit(2)
     if args.command == "update" and (result["failures"] or result["metadata_failures"]):

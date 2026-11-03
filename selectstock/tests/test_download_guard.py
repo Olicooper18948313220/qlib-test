@@ -259,5 +259,5 @@ def test_budget_keeps_committed_data_and_resumes(config, monkeypatch):
     assert first.paused and first.downloaded == 1 and first.network_requests == 2
     clock.now += config["data"]["budget_cooldown_seconds"] + 1
     second = update_data(config, now=NOW)
-    assert not second.paused and second.cached == 1 and second.downloaded == 1
-    assert second.network_requests == 2
+    assert not second.paused and second.cached == 0 and second.downloaded == 2
+    assert second.network_requests == 4

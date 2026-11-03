@@ -23,6 +23,7 @@ def config(tmp_path):
                 "request_jitter_seconds": 0,
                 "retry_backoff_seconds": 0,
                 "retries": 1,
+                "auto_resume": False,
             }
         }
     )

@@ -13,7 +13,7 @@ def test_empty_bars_report_insufficient_instead_of_crashing(config):
     update_data(config, provider=provider, now=NOW)
     result = run_scans(config, now=NOW)
     for frame in result.frames.values():
-        assert frame.status.eq("insufficient").all()
+        assert frame.status.eq("skipped").all()
         assert frame.reasons.str.contains("missing_daily_bars").all()
 
 

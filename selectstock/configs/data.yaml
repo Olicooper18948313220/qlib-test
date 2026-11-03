@@ -12,7 +12,9 @@ request_pause_seconds: 1.0         # 实际 HTTP 请求的最小起始间隔，�
 request_jitter_seconds: 0.2
 download_batch_requests: 100
 download_batch_pause_seconds: 10
-max_requests_per_run: 600          # 预算用尽暂停，之后可续传
+max_requests_per_run: 600          # 每段预算，默认自动等待后继续
+auto_resume: true
+max_recovery_attempts: 3
 budget_cooldown_seconds: 60
 rate_limit_cooldown_seconds: 900   # HTTP 429/403 至少冷却 15 分钟
 max_consecutive_failures: 5

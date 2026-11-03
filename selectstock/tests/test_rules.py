@@ -86,7 +86,7 @@ def test_month_anchor_on_weekend(config):
 def test_warmup_stale_and_historical_metadata(config):
     seed(config, count=20)
     result = run_scans(config, now=NOW)
-    assert result.frames["potent"].status.eq("insufficient").all()
+    assert result.frames["potent"].status.eq("skipped").all()
     assert result.frames["potent"].reasons.str.contains("warmup").all()
     config["data"]["end"] = "2026-10-29"
     result = run_scans(config, now=NOW)

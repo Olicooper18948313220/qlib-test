@@ -19,7 +19,7 @@ def compare(value, threshold, op):
 def finish(checks, issues):
     unknown = [name for name, passed in checks.items() if passed is None]
     failures = [name for name, passed in checks.items() if passed is False]
-    status = "insufficient" if issues or unknown else "failed" if failures else "passed"
+    status = "skipped" if issues or unknown else "failed" if failures else "passed"
     return {
         "status": status,
         "reasons": ";".join(issues + ["unknown:" + x for x in unknown] + failures),

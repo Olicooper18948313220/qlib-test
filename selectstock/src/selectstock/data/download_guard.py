@@ -26,6 +26,10 @@ class DownloadGuard:
         self.path = Path(settings["download_state"])
         self.clock, self.sleep, self.uniform = clock, sleep, uniform
         self.request_count = 0
+        self.segment_start = 0
+        self.recovery_attempts = {}
+        self.progress = lambda **event: None
+        self.report = None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = FileLock(str(self.path) + ".lock", timeout=10)
 
@@ -78,12 +82,52 @@ class DownloadGuard:
         if state["consecutive_failures"] >= self.settings["max_consecutive_failures"]:
             self._pause(state, "连续网络错误，下载已暂停", self.settings["failure_cooldown_seconds"])
 
+    def run(self, function):
+        """Retry this operation in place, without revisiting committed stocks/pages."""
+        while True:
+            try:
+                self.check()
+                result = function()
+                self.recovery_attempts.clear()
+                return result
+            except DownloadPaused as exc:
+                if not self.settings["auto_resume"]:
+                    raise
+                budget = "预算" in exc.reason
+                kind = "budget" if budget else "network" if "网络" in exc.reason else "rate"
+                attempts = self.recovery_attempts.get(kind, 0)
+                if not budget and attempts >= self.settings["max_recovery_attempts"]:
+                    raise
+                self.progress(stage="waiting", reason=exc.reason, resume_after=exc.resume_after)
+                while self.clock() < exc.resume_at:
+                    self.progress(
+                        stage="waiting",
+                        reason=exc.reason,
+                        resume_after=exc.resume_after,
+                        remaining_seconds=max(0, exc.resume_at - self.clock()),
+                    )
+                    self.sleep(min(1, exc.resume_at - self.clock()))
+                self.recovery_attempts[kind] = attempts + 1
+                if budget:
+                    self.segment_start = self.request_count
+                    if self.report:
+                        self.report.segments += 1
+                elif self.report:
+                    self.report.recoveries += 1
+                with self.lock:
+                    state = self._load()
+                    # Keep another process's longer/newer cooldown intact.
+                    if state.get("cooldown_until", 0) <= self.clock():
+                        state["consecutive_failures"] = 0
+                        self._save(state)
+                self.progress(stage="resuming", reason=exc.reason)
+
     def request(self, send):
         # Hold the lock until response completion: separate Notebook kernels share one request lane.
         with self.lock:
             state = self._load()
             self._check(state)
-            if self.request_count >= self.settings["max_requests_per_run"]:
+            if self.request_count - self.segment_start >= self.settings["max_requests_per_run"]:
                 self._pause(
                     state, "本轮 HTTP 请求预算已用完，已保存进度", self.settings["budget_cooldown_seconds"]
                 )

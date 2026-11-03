@@ -49,3 +49,37 @@ def data_issues(frame, asof, required):
     if frame["adjustment"].nunique() != 1:
         issues.append("mixed_price_basis")
     return issues
+
+
+def partition_bars(frame):
+    """Keep valid evidence; isolate bad/conflicting rows without fabricating prices."""
+    if frame.empty:
+        return frame, []
+    frame = frame.drop_duplicates().copy()
+    conflicts = frame["ts"].duplicated(keep=False)
+    good, bad = [], []
+    for i, row in frame.iterrows():
+        reason = "conflicting_timestamp" if conflicts.loc[i] else None
+        if reason is None:
+            values = pd.to_numeric(row[["open", "high", "low", "close", "volume"]], errors="coerce")
+            if not np.isfinite(values).all():
+                reason = "non_finite_ohlcv"
+            elif (values[["open", "high", "low", "close"]] <= 0).any():
+                reason = "non_positive_price"
+            elif values["volume"] < 0:
+                reason = "negative_volume"
+            elif values["high"] < max(values["open"], values["close"], values["low"]):
+                reason = "high_below_ohlc"
+            elif values["low"] > min(values["open"], values["close"], values["high"]):
+                reason = "low_above_ohlc"
+            elif pd.isna(row["ts"]):
+                reason = "missing_timestamp"
+        if reason:
+            raw = {
+                k: None if pd.isna(v) else str(v) if isinstance(v, pd.Timestamp) else v
+                for k, v in row.to_dict().items()
+            }
+            bad.append({"session_date": row["session_date"], "reason": reason, "raw": raw})
+        else:
+            good.append(i)
+    return frame.loc[good].sort_values("ts").reset_index(drop=True), bad
